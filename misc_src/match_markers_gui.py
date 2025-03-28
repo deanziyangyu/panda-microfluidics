@@ -1,4 +1,3 @@
-# import apriltag
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -25,15 +24,20 @@ import socket
 import logging
 import datetime
 import argparse
+from pathlib import Path
 
 import csv
 import cv2
+import apriltag
+
 from PyQt5.QtWidgets import QApplication, QLabel, QHBoxLayout, QVBoxLayout, QWidget, QPushButton
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QSize
 
+import time
+
 FILE_SET = False
-CAMERA_NUM = 0
+CAMERA_NUM = 4
 
 HOST = '127.0.0.1'  # Server IP address
 PORT = 12345       # Server port number
@@ -43,6 +47,9 @@ logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter(
     '%(asctime)s - %(filename)s - %(funcName)s - %(levelname)s - %(message)s'
 )
+
+source_path = Path(__file__).resolve()
+source_dir = source_path.parent
 
 csv_fields = ['TimeStamp', 'Event']
 csv_fpath = ""
@@ -55,10 +62,10 @@ vid_fname = "_rec_vids.mp4"
 
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
-template_a = cv2.imread("fiducial_template_a.png", cv2.IMREAD_GRAYSCALE)
+template_a = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_a.png", cv2.IMREAD_GRAYSCALE)
 
 
-def match_markers(source, template_a):
+def match_markers(source, template_to_match):
     # Perform scale-invariant template matching
     # best_match = None
     # best_val = -np.inf
@@ -66,12 +73,10 @@ def match_markers(source, template_a):
 
     matches = []
 
-    top_k = 5
-    scales = [0.5, 0.75, 1.0, 1.25, 1.5]  # Define scales to resize the template
+    top_k = 1
+    scales = [0.25, 0.35, 0.5,]  # Define scales to resize the template
     # angles = [0, 11.25, 22.5, 33.75, 45, 56.25, 67.5, 78.75, 90]  # Define angles to rotate the template
-    angles = [0, 22.5, 45, 67.5, 90]  # Define angles to rotate the template
-
-    template_to_match = template_a
+    angles = [0, 22.5, 45, 67.5,]  # Define angles to rotate the template
 
     for angle in angles:
         # Rotate the template
@@ -229,7 +234,7 @@ class VideoCaptureWorker(QObject):
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         self.capture.set(cv2.CAP_PROP_EXPOSURE, -6)
         self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
+        self.capture.set(cv2.CAP_PROP_FPS, 1)
         _, frame = self.capture.read()
         fshape = frame.shape
         self.fheight = fshape[0]
@@ -240,9 +245,56 @@ class VideoCaptureWorker(QObject):
     def run(self):
         while self.running:
             _, frame = self.capture.read()
-            ret = match_markers(frame, template_a)
-            # print(ret)
-            self.rec_dir_label.setText(str(ret))
+            
+            if isinstance(frame, np.ndarray):
+
+                frame_grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                t = time.time()
+
+                # apriltag detection
+                at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag36h11"))
+                at_det_result = at_det.detect(frame_grey)
+
+                # use a center crop for dmf checker template matching
+                frame_grey_center_crop = frame_grey[300:780, 700:1320]
+                ret = match_markers(frame_grey_center_crop, template_a)
+                print(time.time()-t)
+                matched_num = 0
+                for _, top_left, (h,w) in ret:
+                    top_left = (top_left[0] + 700, top_left[1] + 300)
+                    bottom_right = (top_left[0] + w, top_left[1] + h)
+                    cv2.rectangle(frame, top_left, bottom_right, 255, 2)
+                    cv2.putText(frame, f"{len(ret)-matched_num}", top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                    matched_num +=1
+                for at_detections in at_det_result:
+                    corners = at_detections.corners
+                    tag_id = at_detections.tag_id
+
+                    for i in range(4):
+                        start_pt = tuple(corners[i].astype(int))
+                        end_pt = tuple(corners[(i+1)%4].astype(int))
+                        cv2.line(frame, start_pt, end_pt, (0,255,0),2)
+                    
+                    tag_center = tuple(at_detections.center.astype(int))
+                    cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+                #    self.rec_dir_label.setText(str(ret))
+
+                # Hough circle detection
+                frame_grey_center_crop_gauss = cv2.GaussianBlur(frame_grey_center_crop, (7,7,), 2)
+                circles = cv2.HoughCircles(
+                    frame_grey_center_crop,
+                    cv2.HOUGH_GRADIENT,
+                    dp=1.2,
+                    minDist=200,
+                    param1=50,
+                    param2=30,
+                    minRadius=10,
+                    maxRadius=20,
+                )
+
+                print(circles)
+
 
             if self.is_capturing:
                 if FILE_SET:
