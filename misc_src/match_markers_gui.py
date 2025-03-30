@@ -1,6 +1,4 @@
 import numpy as np
-from matplotlib import pyplot as plt
-
 
 """ A OpenCV-based Webcam Server Listening on [IP] [PORT]
 Usage:
@@ -35,7 +33,7 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QSize
 
 import time
-import roboticstoolbox as rtb
+# import roboticstoolbox as rtb
 from spatialmath import SE3
 
 FILE_SET = False
@@ -76,7 +74,7 @@ def match_markers(source, template_to_match):
     matches = []
 
     top_k = 1
-    scales = [0.25, 0.35, 0.5,]  # Define scales to resize the template
+    scales = [0.25, 0.35, 0.5, ]  # Define scales to resize the template
     # angles = [0, 11.25, 22.5, 33.75, 45, 56.25, 67.5, 78.75, 90]  # Define angles to rotate the template
     angles = [0, 22.5, 45, 67.5,]  # Define angles to rotate the template
 
@@ -232,6 +230,7 @@ class ImageProcessingWorker(QObject):
     
     def run(self):
         while self.running:
+            time.sleep(0.05)
             pass
 
     def stop_processing(self):
@@ -267,46 +266,63 @@ class ImageProcessingWorker(QObject):
             cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
 
         # Draw the detected circle using cv2
-        center = (int(circles_detected[0][0][0]) + 700, int(circles_detected[0][0][1]) + 300)  # Circle center
-        radius = int(circles_detected[0][0][2])  # Circle radius
-        cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
-        cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
-        cv2.putText(frame, f"  Circle Center: {center}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        for i in range(circles_detected.shape[1]):
+
+            center = (int(circles_detected[0][i][0]) + 700, int(circles_detected[0][i][1]) + 300) # Circle center
+            radius = int(circles_detected[0][i][2])  # Circle radius
+            cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
+            cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
+            cv2.putText(frame, f"Circle Center: {center}, r:{radius}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
         return frame
-    
+
+
     def process_image_once(self, frame):
-        
+        # print(frame)
+
         if isinstance(frame, np.ndarray):
 
             frame_grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_grey_center_crop = frame_grey[300:780, 700:1320] # middle crop of 1920:
+            frame_grey_center_crop_circles = frame_grey[300:1080, 700:1320] # bottom right crop for the pipet tip
 
-            # apriltag detection
-            at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag36h11"))
-            at_det_result = at_det.detect(frame_grey)
+            try:
+                # apriltag detection
+                at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag36h11"))
+                at_det_result = at_det.detect(frame_grey)
 
-            # use a center crop for dmf checker template matching
-            frame_grey_center_crop = frame_grey[300:780, 700:1320]
-            ret_template_matched = match_markers(frame_grey_center_crop, template_a)
+                # use a center crop for dmf checker template matching
+                ret_template_matched = match_markers(frame_grey_center_crop, template_a)
 
-            # Hough circle detection
-            frame_grey_center_crop_gauss = cv2.GaussianBlur(frame_grey_center_crop, (7,7,), 2)
-            circles_detected = cv2.HoughCircles(
-                frame_grey_center_crop_gauss,
-                cv2.HOUGH_GRADIENT,
-                dp=1.2,
-                minDist=200,
-                param1=50,
-                param2=30,
-                minRadius=10,
-                maxRadius=20,
+                # Hough circle detection
+                frame_grey_center_crop_circle_gauss = cv2.GaussianBlur(frame_grey_center_crop_circles, (7,7,), 2)
+                circles_detected = cv2.HoughCircles(
+                    frame_grey_center_crop_circle_gauss,
+                    cv2.HOUGH_GRADIENT,
+                    dp=1.2,
+                    minDist=200,
+                    param1=50,
+                    param2=30,
+                    minRadius=10,
+                    maxRadius=45,
+                )
+            except Exception as exp:
+                print(exp)
+                return
+            
+            template_success, atdet_success, circle_success = (
+                isinstance(ret_template_matched, list), isinstance(at_det_result, list) , isinstance(circles_detected, np.ndarray)
             )
 
-            frame_viz = self.draw_visualization_cv2(
-                frame, ret_template_matched, at_det_result, circles_detected
-            )
+            if template_success == True and atdet_success == True and circle_success == True:
+            
+                frame = self.draw_visualization_cv2(
+                    frame, ret_template_matched, at_det_result, circles_detected
+                )
+            else:
+                print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
 
-            self.frameUpdated.emit(frame_viz)  
+            self.frameUpdated.emit(frame)  
             self.dataUpdated.emit((ret_template_matched, at_det_result, circles_detected))
             
 
@@ -337,64 +353,6 @@ class VideoCaptureWorker(QObject):
     def run(self):
         while self.running:
             _, frame = self.capture.read()
-            
-            # if isinstance(frame, np.ndarray):
-
-            #     frame_grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            #     # t = time.time()
-
-            #     # apriltag detection
-            #     at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag36h11"))
-            #     at_det_result = at_det.detect(frame_grey)
-
-            #     # use a center crop for dmf checker template matching
-            #     frame_grey_center_crop = frame_grey[300:780, 700:1320]
-            #     ret = match_markers(frame_grey_center_crop, template_a)
-                
-            #     # print(time.time()-t)
-
-            #     matched_num = 0
-            #     for _, top_left, (h,w) in ret:
-            #         top_left = (top_left[0] + 700, top_left[1] + 300)
-            #         bottom_right = (top_left[0] + w, top_left[1] + h)
-            #         cv2.rectangle(frame, top_left, bottom_right, 255, 2)
-            #         cv2.putText(frame, f"{len(ret)-matched_num}", top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-            #         matched_num +=1
-                
-            #     for at_detections in at_det_result:
-            #         corners = at_detections.corners
-            #         tag_id = at_detections.tag_id
-
-            #         for i in range(4):
-            #             start_pt = tuple(corners[i].astype(int))
-            #             end_pt = tuple(corners[(i+1)%4].astype(int))
-            #             cv2.line(frame, start_pt, end_pt, (0,255,0),2)
-                    
-            #         tag_center = tuple(at_detections.center.astype(int))
-            #         cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-            #     #    self.rec_dir_label.setText(str(ret))
-
-            #     # Hough circle detection
-            #     frame_grey_center_crop_gauss = cv2.GaussianBlur(frame_grey_center_crop, (7,7,), 2)
-            #     circles = cv2.HoughCircles(
-            #         frame_grey_center_crop_gauss,
-            #         cv2.HOUGH_GRADIENT,
-            #         dp=1.2,
-            #         minDist=200,
-            #         param1=50,
-            #         param2=30,
-            #         minRadius=10,
-            #         maxRadius=20,
-            #     )
-
-            #     # Draw the detected circle using cv2
-            #     center = (int(circles[0][0][0]) + 700, int(circles[0][0][1]) + 300)  # Circle center
-            #     radius = int(circles[0][0][2])  # Circle radius
-            #     cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
-            #     cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
-            #     cv2.putText(frame, f"  Circle Center: {center}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
 
             if self.is_capturing:
                 if FILE_SET:
@@ -460,21 +418,6 @@ class WebcamCaptureApp(QWidget):
             self.video_thread.started.connect(self.video_worker.run)
             self.video_thread.start()
 
-            # Image Processing Worker
-            self.image_processing_worker = ImageProcessingWorker()
-            self.image_processing_worker.frameUpdated.connect(self.update_video)
-            self.video_worker.frameUpdated.connect(self.image_processing_worker.process_image_once)
-            self.image_processing_thread = QThread()
-            self.image_processing_worker.moveToThread(self.image_processing_thread)
-            self.image_processing_thread.started.connect(self.image_processing_worker.run)
-            self.image_processing_thread.start()
-
-
-            # Spatial Processing Worker
-            # self.spatial_processing_worker = 
-
-
-
             # Client Handling Worker
             self.client_handler = ClientHandlingWorker()
             self.client_thread = QThread()
@@ -484,6 +427,19 @@ class WebcamCaptureApp(QWidget):
             self.client_handler.recStatusUpdated.connect(self.rec_video_updated)
             self.client_handler.fileUpdated.connect(self.rec_dir_updated)
             self.client_thread.start()
+
+            # Image Processing Worker
+            self.image_processing_worker = ImageProcessingWorker()
+            self.video_worker.frameUpdated.connect(self.image_processing_worker.process_image_once)
+
+            self.image_processing_thread = QThread()
+            self.image_processing_worker.moveToThread(self.image_processing_thread)
+            self.image_processing_thread.started.connect(self.image_processing_worker.run)
+            self.image_processing_worker.frameUpdated.connect(self.update_video)
+            self.image_processing_thread.start()
+
+            # Spatial Processing Worker
+            # self.spatial_processing_worker = 
 
         except KeyboardInterrupt:
             logger.debug("Keyboard interrupt received. Shutting down webcam server...")
