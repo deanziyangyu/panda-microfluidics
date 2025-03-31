@@ -41,6 +41,7 @@ CAMERA_NUM = 4
 
 HOST = '127.0.0.1'  # Server IP address
 PORT = 12345       # Server port number
+PORT_CLIENT = 12346
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -63,9 +64,111 @@ vid_fname = "_rec_vids.mp4"
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
 template_a = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_a.png", cv2.IMREAD_GRAYSCALE)
+template_chip = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_chip.png", cv2.IMREAD_GRAYSCALE)
+template_chip = cv2.resize(template_chip, (120, 200))
+
+
+
+def match_fiducial_orb(source, template=None,
+                       template_kp_desc=None,
+                       min_match_count=8, 
+                       good_match_ratio=0.75):
+    """
+    Detects the fiducial marker (template) in the source image using ORB feature matching.
+    Returns:
+        homography: The 3x3 homography matrix if enough matches are found, otherwise None
+        corners_in_scene: The projected corner coordinates of the template in the source image
+                          as a numpy array of shape (4, 2). None if not found.
+        matches_mask: A mask array that indicates which matches are inliers (for visualization)
+    """
+
+    # Initialize ORB detector
+    orb = cv2.ORB_create(
+        nfeatures = 200,                    # The maximum number of features to retain.
+        scaleFactor = 1.3,                  # Pyramid decimation ratio, greater than 1
+        nlevels = 5,                        # The number of pyramid levels.
+        edgeThreshold = 7,                  # This is size of the border where the features are not detected. It should roughly match the patchSize parameter
+        firstLevel = 0,                     # It should be 0 in the current implementation.
+        WTA_K = 2,                          # The number of points that produce each element of the oriented BRIEF descriptor.
+        scoreType = cv2.ORB_HARRIS_SCORE,   # The default HARRIS_SCORE means that Harris algorithm is used to rank features (the score is written to KeyPoint::score and is 
+                                            # used to retain best nfeatures features); 
+        # scoreType = cv2.ORB_FAST_SCORE,     # FAST_SCORE is alternative value of the parameter that produces slightly less stable 
+                                            # keypoints, but it is a little faster to compute.
+        patchSize = 7                      
+    )
+
+    # Convert images to grayscale (ORB works on grayscale)
+    gray_source = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY) \
+        if len(source.shape) == 3 else source
+    if isinstance(template_kp_desc, type(None)):
+        gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) \
+            if len(template.shape) == 3 else template
+        kp_template, desc_template = orb.detectAndCompute(gray_template, None)
+        template_kp_desc = (kp_template, desc_template)
+    elif isinstance(template, type(None)):
+        kp_template, desc_template = template_kp_desc
+
+    # 3. Detect keypoints and compute descriptors
+    # kp_template, desc_template = orb.detectAndCompute(gray_template, None)
+    kp_source, desc_source = orb.detectAndCompute(gray_source, None)
+
+    # Check if descriptors are valid
+    if desc_template is None or desc_source is None:
+        return None, None, None, None, None
+
+    # 4. Use a brute-force matcher or FLANN-based matcher
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+
+    # 5. Match descriptors (KNN)
+    matches_knn = bf.knnMatch(desc_template, desc_source, k=2)
+    
+    # 6. Lowe's ratio test to filter good matches
+    good_matches = []
+    for m, n in matches_knn:
+        if m.distance < good_match_ratio * n.distance:
+            good_matches.append(m)
+
+    # 7. Check if enough matches are present
+    if len(good_matches) < min_match_count:
+        # Not enough matches to reliably compute homography
+        return None, None, None
+
+    # 8. Extract matched keypoints’ coordinates
+    src_pts = np.float32([kp_template[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+    dst_pts = np.float32([kp_source[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+    # 9. Compute homography with RANSAC
+    homography, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+    matches_mask = mask.ravel().tolist()
+
+    if homography is None:
+        return None, None, None
+
+    # 10. Once we have the homography, transform the corners of the template
+    hT, wT = gray_template.shape[:2]
+    template_corners = np.float32([[0, 0],
+                                   [wT, 0],
+                                   [wT, hT],
+                                   [0, hT]]).reshape(-1, 1, 2)
+
+    corners_in_scene = cv2.perspectiveTransform(template_corners, homography)
+
+    if isinstance(template, type(None)):
+        return homography, corners_in_scene.reshape(-1, 2), matches_mask, src_pts, dst_pts, template_kp_desc
+
+    return homography, corners_in_scene.reshape(-1, 2), matches_mask, src_pts, dst_pts, None
+
 
 
 def match_markers(source, template_to_match):
+    """
+    Simple heuristic to match a template to a source image using scale-invariant template matching.
+    Args:
+        source: The source image to search for the template.
+        template_to_match: The template image to search for in the source image
+    Returns:
+        matches: A list of tuples (score, location, template_size) of the top-k matches found.
+    """
     # Perform scale-invariant template matching
     # best_match = None
     # best_val = -np.inf
@@ -109,6 +212,48 @@ def match_markers(source, template_to_match):
     matches = sorted(matches, key=lambda x: x[0], reverse=True)[:top_k]
 
     return matches
+
+class SocketCommClient:
+    def __init__(self):
+        super().__init__()
+        self.client_socket = None
+        self.host = HOST
+        self.port = PORT_CLIENT
+        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # # Reuse IP:PORT if available
+        # self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # self.server_socket.bind((HOST, PORT))
+        # self.server_socket.listen(1)
+        # self.server_socket.settimeout(20)
+        # data = self.client_socket.recv(1024).decode('utf-8')
+
+    def sendall(self, data):
+        while data:
+            sent = self.client_socket.send(data)
+            data = data[sent:]
+
+    def send_str(self, send_str):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+        try:
+            self.sendall(bytes("STR$$$$"+send_str, 'utf-8'))
+            print("Send STR --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+    
+    def send_pose_rpy(self, xyz, rpy):
+        # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
+        send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "rpy": {rpy}}}'
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+        try:
+            self.sendall(bytes("POSERPY$"+send_str, 'utf-8'))
+            print("Send STR --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+
 
 class SpatialProcessingWorker(QObject):
     finished = pyqtSignal()
@@ -257,6 +402,7 @@ class ImageProcessingWorker(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.running = True
+        self.template = None
     
     def run(self):
         while self.running:
@@ -281,16 +427,33 @@ class ImageProcessingWorker(QObject):
             cv2.putText(frame, f"{len(ret_template_matched)-matched_num}",
                             top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
             matched_num +=1
+
+        hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
+        # draw the corners bounding box
+        for i in range(len(mask)):
+            if mask[i] == 1:
+                cv2.circle(frame, tuple(dest_pts[i,0].astype(int)), 5, (255,0,0), -1)
+
+        cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
+
+        # frame = frame_center_crop.copy()
+        # for i in range(4):
+        #     start_pt = tuple(corners[i].astype(int))
+        #     end_pt = tuple(corners[(i+1)%4].astype(int))
+        #     cv2.line(frame, start_pt, end_pt, (0,255,0),2)
+
         
         # Draw the detected apriltags using cv2
         for at_detections in at_det_result:
             corners = at_detections.corners
             tag_id = at_detections.tag_id
 
-            for i in range(4):
-                start_pt = tuple(corners[i].astype(int))
-                end_pt = tuple(corners[(i+1)%4].astype(int))
-                cv2.line(frame, start_pt, end_pt, (0,255,0),2)
+            # for i in range(4):
+            #     start_pt = tuple(corners[i].astype(int))
+            #     end_pt = tuple(corners[(i+1)%4].astype(int))
+            #     cv2.line(frame, start_pt, end_pt, (0,255,0),2)
+            
+            cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
             
             tag_center = tuple(at_detections.center.astype(int))
             cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
@@ -323,6 +486,20 @@ class ImageProcessingWorker(QObject):
 
                 # use a center crop for dmf checker template matching
                 ret_template_matched = match_markers(frame_grey_center_crop, template_a)
+
+                # hg_mat, corners, mask, src_pts, dest_pts 
+                if self.template is None:
+                    ret_template_matched =  match_fiducial_orb(
+                        frame_grey_center_crop, template_chip, None, 
+                        min_match_count=1, good_match_ratio=0.75
+                    )
+                    self.template = ret_template_matched[-1] # cache the template keyypoints and descriptors
+                else:
+                    ret_template_matched =  match_fiducial_orb(
+                        frame_grey_center_crop, None, self.template, 
+                        min_match_count=1, good_match_ratio=0.75
+                    )
+                ret_template_matched = list(ret_template_matched[:-1])
 
                 # Hough circle detection
                 frame_grey_center_crop_circle_gauss = cv2.GaussianBlur(frame_grey_center_crop_circles, (7,7,), 2)
@@ -467,6 +644,13 @@ class WebcamCaptureApp(QWidget):
             self.image_processing_thread.started.connect(self.image_processing_worker.run)
             self.image_processing_worker.frameUpdated.connect(self.update_video)
             self.image_processing_thread.start()
+
+            self.ip_client = SocketCommClient()
+            try:
+                self.ip_client.send_str("HS")
+            except Exception as e:
+                print(e)
+                pass
 
             # Spatial Processing Worker
             # self.spatial_processing_worker = SpatialProcessingWorker()

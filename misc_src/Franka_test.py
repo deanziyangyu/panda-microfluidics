@@ -13,6 +13,8 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from franka_msgs.action import Grasp, Homing, Move #GripperCommand
 from std_srvs.srv import Trigger
+import datetime
+from queue import Queue, Empty
 
 import socket
 import json
@@ -28,8 +30,63 @@ PORT_SERVER = 12346 # server port number on host PC
 # Reading Serial target pose function?
 #             return target_pose  # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
 
+class SocketCommServer:
+    def __init__(self):
+        super().__init__()
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Allow address reuse
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind((HOST, PORT_SERVER))
+        self.server_socket.listen(1)
+        self.server_socket.settimeout(None)  # Use blocking accept
+        self.client_socket = None
+        self.running = True
+        # This event will control whether the server should be active.
+        self.active_event = threading.Event()
+        self.active_event.set()  # Start in an active state
 
-class SerialMessageClient:
+    def start_server(self):
+        print("Waiting for connection...")
+        self.client_socket, addr = self.server_socket.accept()
+        print("Connected to:", addr)
+        return self.client_socket
+
+    def listen(self):
+        # Block until the server is resumed.
+        self.active_event.wait()
+        try:
+            if self.client_socket:
+                # This is a blocking call that waits for data
+                data = self.client_socket.recv(1024).decode('utf-8')
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                return data, timestamp
+        except socket.error as e:
+            print("Socket error:", e)
+        return None, None
+
+    def suspend(self):
+        """Suspend listening (no CPU cycles will be used while suspended)."""
+        print("Server suspended.")
+        self.active_event.clear()
+
+    def resume(self):
+        """Resume listening."""
+        print("Server resumed.")
+        self.active_event.set()
+
+    def close_all_conn(self):
+        """Close all connections."""
+        self.running = False
+        try:
+            self.server_socket.shutdown(socket.SHUT_RDWR)
+            self.server_socket.close()
+        except Exception:
+            pass
+        self.server_socket = None
+        self.client_socket = None
+    
+
+class SocketCommClient:
     def __init__(self):
         super().__init__()
         self.client_socket = None
@@ -202,7 +259,27 @@ def main(args=None):
     node_handle = Node('inverse_kinematics_node')
     fsi = FrankaStateInterface(node_handle)
     gripper_client = GripperActionClient()
-    serial_client = SerialMessageClient()
+    socket_client = SocketCommClient() # for communication to the qtgui
+    socket_server = SocketCommServer() # for communication from the                             
+
+    # Start the server and wait for a client connection (blocking)
+    socket_server.start_server()
+
+    data_queue = Queue()
+
+    def server_loop():
+        while socket_server.running:
+            data, timestamp = socket_server.listen()
+            if data:
+                print(f"[{timestamp}] Thread Received: {data}")
+                # Place received data and its timestamp into the queue
+                data_queue.put((data, timestamp))
+
+    # Start the server_loop in a separate thread
+    server_thread = threading.Thread(target=server_loop)
+    server_thread.start()
+
+    socket_server.suspend() #suspend the server
 
     # Initialize ROS2 spin thread
     spin_func = lambda _ : rclpy.spin(node_handle)
@@ -245,10 +322,32 @@ def main(args=None):
     # Step 2: Move to above the device for pickup view
     ret_pose = move_to_pose(fsi, panda, device_view_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
-    time.sleep(2)
+    # wait_for_pose_refinement = True
+    socket_server.resume()
+    while socket_server.running:
+        try:
+            # Try to get data from the queue with a timeout
+            data, timestamp = data_queue.get(timeout=.5)
+            break
+        except Empty:
+            continue
+    socket_server.suspend()
+    print(f"Main thread captured data at [{timestamp}]: {data}")
+
+    socket_server.resume()
+    while socket_server.running:
+        try:
+            # Try to get data from the queue with a timeout
+            data, timestamp = data_queue.get(timeout=.5)
+            break
+        except Empty:
+            continue
+    socket_server.suspend()
+    print(f"Main thread captured data at [{timestamp}]: {data}")
+
 
     # Step 3: Move to above device via a targeted posed from camera
     # Move only along the xy plane when given a target pose through serial communication
@@ -260,7 +359,7 @@ def main(args=None):
 
     ret_pose = move_to_pose(fsi, panda, device_pickup_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
 
@@ -270,7 +369,7 @@ def main(args=None):
     time.sleep(3)
     ret_pose = move_to_pose(fsi, panda, device_view_pose) #return to view pose
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -278,13 +377,13 @@ def main(args=None):
     # Step 5: Move to placement view pose
     ret_pose = move_to_pose(fsi, panda, start_pose) #transition pose
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
     ret_pose = move_to_pose(fsi, panda, placement_view_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -294,7 +393,7 @@ def main(args=None):
     # Step 8: Lower to place device
     ret_pose = move_to_pose(fsi, panda, device_place_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -304,14 +403,14 @@ def main(args=None):
 
     ret_pose = move_to_pose(fsi, panda, placement_view_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
 
     ret_pose = move_to_pose(fsi, panda, start_pose) #transition pose
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -319,7 +418,7 @@ def main(args=None):
     # Step 9: Move to syring view pose
     ret_pose = move_to_pose(fsi, panda, pipette_view_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -327,7 +426,7 @@ def main(args=None):
     # Step 10: assuming syring is same place everytime and fixed, we just open loop pick up pipette
     ret_pose = move_to_pose(fsi, panda, pipette_pickup_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
@@ -338,19 +437,19 @@ def main(args=None):
 
     ret_pose = move_to_pose(fsi, panda, pipette_pickup_pose) #return to orignal pose and then transition pose
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
     ret_pose = move_to_pose(fsi, panda, start_pose)
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
     ret_pose = move_to_pose(fsi, panda, pipette_alignment_pose) #move to pose to view device and start aligning pipette
     if isinstance(ret_pose, np.ndarray):
-        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+        socket_client.send_joint_pos(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     time.sleep(2)
