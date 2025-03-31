@@ -1,6 +1,6 @@
 import copy
 import numpy as np
-import pygame
+import sys
 import threading
 import time
 
@@ -14,13 +14,97 @@ from rclpy.node import Node
 from franka_msgs.action import Grasp, Homing, Move #GripperCommand
 from std_srvs.srv import Trigger
 
-# For Serial?
-import serial
+import socket
 import json
 
 # Stuff to launch in other terminals
 # ros2 launch franka_gripper gripper.launch.py robot_ip:=192.168.1.107
-# ros2 run franka_ros2_csc379 run_franka_impedance_control_ros2 
+# ros2 run franka_ros2_csc379 run_franka_impedance_control_ros2
+
+HOST = '127.0.0.1'  # IP address on host PC
+PORT = 12345       # client port number on host PC
+PORT_SERVER = 12346 # server port number on host PC
+
+# Reading Serial target pose function?
+#             return target_pose  # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
+
+
+class SerialMessageClient:
+    def __init__(self):
+        super().__init__()
+        self.client_socket = None
+        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # # Reuse IP:PORT if available
+        # self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # self.server_socket.bind((HOST, PORT))
+        # self.server_socket.listen(1)
+        # self.server_socket.settimeout(20)
+        # data = self.client_socket.recv(1024).decode('utf-8')
+
+    def sendall(self, data):
+        while data:
+            sent = self.client_socket.send(data)
+            data = data[sent:]
+
+    def start_capture(self):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(b'PIKSTART')
+            print("START PICKING --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+
+    def stop_capture(self):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(b'PIKSTOP')
+            print("STOP PICKING --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+
+    def start_rec(self):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(b'RECSTART')
+            print("START REC --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+
+    def stop_rec(self):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(b'RECSTOP')
+            print("STOP REC --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+
+    def send_str(self, send_str):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(bytes("STR$$$$"+send_str, 'utf-8'))
+            print("Send STR --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
+    
+    def send_joint_pos(self, send_str):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((HOST, PORT))
+        try:
+            self.sendall(bytes("JOINTPOS"+send_str, 'utf-8'))
+            print("Send STR --> 127.0.0.1:12345")
+        except Exception as e:
+            print(e)
 
 
 class GripperActionClient(Node):
@@ -87,6 +171,7 @@ class GripperActionClient(Node):
         return rclpy.spin_until_future_complete(self, self.future)
     
 def move_to_pose(fsi, panda, start_pose):
+    intermediate_pos = -1 # if no sol, ret -1
     initial_joint_pos = np.array(fsi.joint_positions)
     print("initial Joint pos", initial_joint_pos)
     current_joint_positions = copy.deepcopy(initial_joint_pos)
@@ -108,26 +193,16 @@ def move_to_pose(fsi, panda, start_pose):
             time.sleep(0.05)
     else:
         print("Failed to find IK solution!")
+    
+    return intermediate_pos
 
-
-#Reading Serial target pose function?
-def read_target_pose(serial_port="/dev/ttyUSB0", baud_rate=115200):
-    """Reads a target pose from serial communication."""
-    try:
-        ser = serial.Serial(serial_port, baud_rate, timeout=1)
-        if ser.in_waiting > 0:
-            data = ser.readline().decode('utf-8').strip()
-            target_pose = json.loads(data)  # Assuming JSON format
-            return target_pose  # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
-    except Exception as e:
-        print(f"Serial Error: {e}")
-        return None
 
 def main(args=None):
     rclpy.init(args=args)
     node_handle = Node('inverse_kinematics_node')
     fsi = FrankaStateInterface(node_handle)
     gripper_client = GripperActionClient()
+    serial_client = SerialMessageClient()
 
     # Initialize ROS2 spin thread
     spin_func = lambda _ : rclpy.spin(node_handle)
@@ -168,7 +243,11 @@ def main(args=None):
     time.sleep(2)
 
     # Step 2: Move to above the device for pickup view
-    move_to_pose(fsi, panda, device_view_pose)
+    ret_pose = move_to_pose(fsi, panda, device_view_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 3: Move to above device via a targeted posed from camera
@@ -176,50 +255,104 @@ def main(args=None):
     # based on read_target_pose?
 
     # Step 4: Lower the ee to pick up device in pickup pose
-    gripper_client.do_move_blocking(width = grasp_width_open, speed = 0.05)
+    gripper_client.do_move_async(width = grasp_width_open, speed = 0.05)
     time.sleep(3)
-    move_to_pose(fsi, panda, device_pickup_pose)
+
+    ret_pose = move_to_pose(fsi, panda, device_pickup_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
+
     time.sleep(2)
-    gripper_client.do_grasp_blocking(width = grasp_device,speed=0.05)
+    gripper_client.do_grasp_async(width = grasp_device,speed=0.05)
+
     time.sleep(3)
-    move_to_pose(fsi, panda, device_view_pose) #return to view pose
+    ret_pose = move_to_pose(fsi, panda, device_view_pose) #return to view pose
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 5: Move to placement view pose
-    move_to_pose(fsi, panda, start_pose) #transition pose
+    ret_pose = move_to_pose(fsi, panda, start_pose) #transition pose
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    move_to_pose(fsi, panda, placement_view_pose)
+    ret_pose = move_to_pose(fsi, panda, placement_view_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 7: Move to above placement location based on april tags in workspace (target location provided through serial)
 
     # Step 8: Lower to place device
-    move_to_pose(fsi, panda, device_place_pose)
+    ret_pose = move_to_pose(fsi, panda, device_place_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    gripper_client.do_move_blocking(width = grasp_width_open, speed = 0.05)
+    
+    gripper_client.do_move_async(width = grasp_width_open, speed = 0.05)
     time.sleep(3)
-    move_to_pose(fsi, panda, placement_view_pose)
+
+    ret_pose = move_to_pose(fsi, panda, placement_view_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    move_to_pose(fsi, panda, start_pose) #transition pose
+
+    ret_pose = move_to_pose(fsi, panda, start_pose) #transition pose
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 9: Move to syring view pose
-    move_to_pose(fsi, panda, pipette_view_pose)
+    ret_pose = move_to_pose(fsi, panda, pipette_view_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 10: assuming syring is same place everytime and fixed, we just open loop pick up pipette
-    move_to_pose(fsi, panda, pipette_pickup_pose)
+    ret_pose = move_to_pose(fsi, panda, pipette_pickup_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    gripper_client.do_grasp_blocking(width = grasp_width_pipet_squeezing[2],speed=0.05) #grasp pipette
+    gripper_client.do_grasp_async(width = grasp_width_pipet_squeezing[2],speed=0.05) #grasp pipette
     time.sleep(3)
 
     # In between here we add more steps to get fluids from a beaker etc.
 
-    move_to_pose(fsi, panda, pipette_pickup_pose) #return to orignal pose and then transition pose
+    ret_pose = move_to_pose(fsi, panda, pipette_pickup_pose) #return to orignal pose and then transition pose
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    move_to_pose(fsi, panda, start_pose)
+    ret_pose = move_to_pose(fsi, panda, start_pose)
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
-    move_to_pose(fsi, panda, pipette_alignment_pose) #move to pose to view device and start aligning pipette
+    ret_pose = move_to_pose(fsi, panda, pipette_alignment_pose) #move to pose to view device and start aligning pipette
+    if isinstance(ret_pose, np.ndarray):
+        serial_client.send_joint_pos(json.dumps(ret_pose.tolist()))
+    else:
+        print("NO POSE")
     time.sleep(2)
 
     # Step 11: Move pipette to inlet and squeeze. Movement based on match circles on device and pipette

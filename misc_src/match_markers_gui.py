@@ -33,7 +33,7 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QSize
 
 import time
-# import roboticstoolbox as rtb
+import roboticstoolbox as rtb
 from spatialmath import SE3
 
 FILE_SET = False
@@ -110,6 +110,24 @@ def match_markers(source, template_to_match):
 
     return matches
 
+class SpatialProcessingWorker(QObject):
+    finished = pyqtSignal()
+    frameUpdated = pyqtSignal(object)
+    dataUpdated = pyqtSignal(object) 
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.running = True
+        self.robot = rtb.models.Panda()
+
+    def run(self):
+        while self.running:
+            time.sleep(0.1)
+            pass
+
+    def stop_processing(self):
+        self.running = False
+        self.finished.emit()
 
 class ClientHandlingWorker(QObject):
     """Continuously Listen to & Receive from Client
@@ -117,6 +135,7 @@ class ClientHandlingWorker(QObject):
     finished = pyqtSignal()
     stampUpdated = pyqtSignal(object)
     recStatusUpdated = pyqtSignal(object)
+    jointPosUpdated = pyqtSignal(object)
     fileUpdated = pyqtSignal(object)
 
     def __init__(self, parent=None):
@@ -172,26 +191,37 @@ class ClientHandlingWorker(QObject):
                         else:
                             logger.debug("Recording Not Started. Need to Create File Objects")
 
-                    elif data[:8] == 'FNAME$$$':
-                        self.fileUpdated.emit("")
-                        logger.debug("Creating File Objects...")
-                        FILE_SET = False
-                        create_file_obj(data[8:], stamp)
-                        start_logging()
-                        FILE_SET = True
-                        logger.debug("GET FNAME %r at %r", data[8:], stamp)
-                        logger.debug("File Objects Created.")
-                        self.fileUpdated.emit(data[8:])
-
-                    elif data[:8] == 'PIKID$$$':
-                        picking_id = data[8:]
-                        logger.debug("NEW PICKID %r at %r", picking_id, stamp)
+                    elif data[:8] == 'JOINTPOS':
+                        joint_pos_str = data[8:]
+                        print(joint_pos_str)
+                        self.jointPosUpdated.emit([joint_pos_str, stamp])
                         if FILE_SET:
                             with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
                                 f_csv = csv.writer(fhdl)
-                                f_csv.writerow([stamp,f"NEWPICKID:{picking_id}"])
+                                f_csv.writerow([stamp, joint_pos_str])
                         else:
                             logger.debug("Need to Create File Objects before Logging !!")
+
+                    # elif data[:8] == 'FNAME$$$':
+                    #     self.fileUpdated.emit("")
+                    #     logger.debug("Creating File Objects...")
+                    #     FILE_SET = False
+                    #     create_file_obj(data[8:], stamp)
+                    #     start_logging()
+                    #     FILE_SET = True
+                    #     logger.debug("GET FNAME %r at %r", data[8:], stamp)
+                    #     logger.debug("File Objects Created.")
+                    #     self.fileUpdated.emit(data[8:])
+
+                    # elif data[:8] == 'PIKID$$$':
+                    #     picking_id = data[8:]
+                    #     logger.debug("NEW PICKID %r at %r", picking_id, stamp)
+                    #     if FILE_SET:
+                    #         with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                    #             f_csv = csv.writer(fhdl)
+                    #             f_csv.writerow([stamp,f"NEWPICKID:{picking_id}"])
+                    #     else:
+                    #         logger.debug("Need to Create File Objects before Logging !!")
                     elif data == '':
                         pass
                     else:
@@ -230,7 +260,7 @@ class ImageProcessingWorker(QObject):
     
     def run(self):
         while self.running:
-            time.sleep(0.05)
+            time.sleep(0.1)
             pass
 
     def stop_processing(self):
@@ -319,8 +349,8 @@ class ImageProcessingWorker(QObject):
                 frame = self.draw_visualization_cv2(
                     frame, ret_template_matched, at_det_result, circles_detected
                 )
-            else:
-                print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
+            # else:
+            #     print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
 
             self.frameUpdated.emit(frame)  
             self.dataUpdated.emit((ret_template_matched, at_det_result, circles_detected))
@@ -439,7 +469,8 @@ class WebcamCaptureApp(QWidget):
             self.image_processing_thread.start()
 
             # Spatial Processing Worker
-            # self.spatial_processing_worker = 
+            # self.spatial_processing_worker = SpatialProcessingWorker()
+            # self.client_handler.jointPosUpdated.connect()
 
         except KeyboardInterrupt:
             logger.debug("Keyboard interrupt received. Shutting down webcam server...")
