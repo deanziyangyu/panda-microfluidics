@@ -114,8 +114,7 @@ def match_fiducial_orb(source, template=None,
 
     # Check if descriptors are valid
     if desc_template is None or desc_source is None:
-        return None, None, None, None, None
-
+        return -1
     # 4. Use a brute-force matcher or FLANN-based matcher
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
@@ -142,7 +141,7 @@ def match_fiducial_orb(source, template=None,
     matches_mask = mask.ravel().tolist()
 
     if homography is None:
-        return None, None, None
+        return -1
 
     # 10. Once we have the homography, transform the corners of the template
     hT, wT = gray_template.shape[:2]
@@ -419,14 +418,14 @@ class ImageProcessingWorker(QObject):
         """
 
         # Draw the matched templates using cv2
-        matched_num = 0
-        for _, top_left, (h,w) in ret_template_matched:
-            top_left = (top_left[0] + 700, top_left[1] + 300)
-            bottom_right = (top_left[0] + w, top_left[1] + h)
-            cv2.rectangle(frame, top_left, bottom_right, 255, 2)
-            cv2.putText(frame, f"{len(ret_template_matched)-matched_num}",
-                            top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-            matched_num +=1
+        # matched_num = 0
+        # for _, top_left, (h,w) in ret_template_matched:
+        #     top_left = (top_left[0] + 700, top_left[1] + 300)
+        #     bottom_right = (top_left[0] + w, top_left[1] + h)
+        #     cv2.rectangle(frame, top_left, bottom_right, 255, 2)
+        #     cv2.putText(frame, f"{len(ret_template_matched)-matched_num}",
+        #                     top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+        #     matched_num +=1
 
         hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
         # draw the corners bounding box
@@ -434,7 +433,7 @@ class ImageProcessingWorker(QObject):
             if mask[i] == 1:
                 cv2.circle(frame, tuple(dest_pts[i,0].astype(int)), 5, (255,0,0), -1)
 
-        cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
+        cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
 
         # frame = frame_center_crop.copy()
         # for i in range(4):
@@ -500,6 +499,7 @@ class ImageProcessingWorker(QObject):
                         min_match_count=1, good_match_ratio=0.75
                     )
                 ret_template_matched = list(ret_template_matched[:-1])
+                # print(len(ret_template_matched))
 
                 # Hough circle detection
                 frame_grey_center_crop_circle_gauss = cv2.GaussianBlur(frame_grey_center_crop_circles, (7,7,), 2)
@@ -526,10 +526,11 @@ class ImageProcessingWorker(QObject):
                 frame = self.draw_visualization_cv2(
                     frame, ret_template_matched, at_det_result, circles_detected
                 )
-            # else:
-            #     print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
+            else:
+                print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
 
-            self.frameUpdated.emit(frame)  
+            self.frameUpdated.emit(frame) 
+            # print(ret_template_matched)
             self.dataUpdated.emit((ret_template_matched, at_det_result, circles_detected))
             
 
@@ -646,11 +647,11 @@ class WebcamCaptureApp(QWidget):
             self.image_processing_thread.start()
 
             self.ip_client = SocketCommClient()
-            try:
-                self.ip_client.send_str("HS")
-            except Exception as e:
-                print(e)
-                pass
+            # try:
+            #     self.ip_client.send_str("HS")
+            # except Exception as e:
+            #     print(e)
+            #     pass
 
             # Spatial Processing Worker
             # self.spatial_processing_worker = SpatialProcessingWorker()
