@@ -38,7 +38,7 @@ from spatialmath import SE3
 
 FILE_SET = False
 USE_CAMERA = True
-CAMERA_NUM = 4
+CAMERA_NUM = 0
 
 HOST = '127.0.0.1'  # Server IP address
 PORT = 12345       # Server port number
@@ -61,7 +61,7 @@ log_fname = "_video_capture_server_debug.log"
 vid_fdir  = ""
 vid_dir   = "_rec_vids/"
 vid_fname = "_rec_vids.mp4"
-cap_video_path = "/../misc_files/vid_test.mp4"
+cap_video_path = "/../misc_files/20250401_214655_rec_vids.mp4"
 
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
@@ -233,9 +233,9 @@ class SocketCommClient:
             self.client_socket.connect((self.host, self.port))
         try:
             self.sendall(bytes("STR$$$$"+send_str, 'utf-8'))
-            print("Send STR --> 127.0.0.1:12345")
+            logger.debug("Send STR --> 127.0.0.1:12345")
         except Exception as e:
-            print(e)
+            logger.debug(e)
     
     def send_pose_rpy(self, xyz, rpy):
         # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
@@ -245,9 +245,9 @@ class SocketCommClient:
             self.client_socket.connect((self.host, self.port))
         try:
             self.sendall(bytes("POSERPY$"+send_str, 'utf-8'))
-            print("Send STR --> 127.0.0.1:12345")
+            logger.debug("Send STR --> 127.0.0.1:12345")
         except Exception as e:
-            print(e)
+            logger.debug(e)
 
 
 class SpatialProcessingWorker(QObject):
@@ -333,7 +333,7 @@ class ClientHandlingWorker(QObject):
 
                     elif data[:8] == 'JOINTPOS':
                         joint_pos_str = data[8:]
-                        print(joint_pos_str)
+                        logger.debug(joint_pos_str)
                         self.jointPosUpdated.emit([joint_pos_str, stamp])
                         if FILE_SET:
                             with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
@@ -408,7 +408,7 @@ class ImageProcessingWorker(QObject):
         self.running = False
         self.finished.emit()
 
-    def draw_visualization_cv2(self, frame, ret_template_matched, at_det_result, circles_detected):
+    def draw_visualization_cv2(self, frame, ret_template_matched, at_det_result, circles_detected,  at_det_rack_result = None,):
         """
         Draw the matched templates, detected apriltags, and detected circles on the frame using cv2
         """
@@ -424,84 +424,171 @@ class ImageProcessingWorker(QObject):
         #     matched_num +=1
 
         # ORB based template matching
-        try:
-            hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
-            # draw the corners bounding box
-            for i in range(len(mask)):
-                if mask[i] == 1:
-                    cv2.circle(frame, tuple(dest_pts[i,0].astype(int) + np.array([300, 700])), 5, (0,0,255), -1)
-                    cv2.circle(frame, tuple(src_pts[i,0].astype(int) + np.array([300, 700])), 5, (255,0,0), -1)
+        # try:
+        #     hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
+        #     # draw the corners bounding box
+        #     for i in range(len(mask)):
+        #         if mask[i] == 1:
+        #             cv2.circle(frame, tuple(dest_pts[i,0].astype(int) + np.array([300, 700])), 5, (0,0,255), -1)
+        #             cv2.circle(frame, tuple(src_pts[i,0].astype(int) + np.array([300, 700])), 5, (255,0,0), -1)
 
-            cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
+        #     cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
 
-        except:
-            pass
+        # except:
+        #     pass
 
-        # frame = frame_center_crop.copy()
-        # for i in range(4):
-        #     start_pt = tuple(corners[i].astype(int))
-        #     end_pt = tuple(corners[(i+1)%4].astype(int))
-        #     cv2.line(frame, start_pt, end_pt, (0,255,0),2)
 
-        
         # Draw the detected apriltags using cv2
         for at_detections in at_det_result:
             corners = at_detections.corners
             tag_id = at_detections.tag_id
-
-            # for i in range(4):
-            #     start_pt = tuple(corners[i].astype(int))
-            #     end_pt = tuple(corners[(i+1)%4].astype(int))
-            #     cv2.line(frame, start_pt, end_pt, (0,255,0),2)
-            
             cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
             
             tag_center = tuple(at_detections.center.astype(int))
             cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
 
+        at_det_result = sorted(at_det_result, key=lambda x: x.tag_id)[:4]
+        tag_0_top_left = at_det_result[0].corners[0]
+        tag_1_top_right = at_det_result[1].corners[1]
+        tag_2_bottom_right = at_det_result[2].corners[2]
+        tag_3_bottom_left = at_det_result[3].corners[3]
+
+        cv2.circle(frame, tag_0_top_left.astype(int).tolist(), 5, (255, 0, 0), -1)
+        cv2.circle(frame, tag_1_top_right.astype(int).tolist(), 5, (255, 0, 0), -1)
+        cv2.circle(frame, tag_2_bottom_right.astype(int).tolist(), 5, (255, 0, 0), -1)
+        cv2.circle(frame, tag_3_bottom_left.astype(int).tolist(), 5, (255, 0, 0), -1)
+
+        combined_corners = np.stack([tag_0_top_left,
+                            tag_1_top_right,
+                            tag_2_bottom_right, 
+                            tag_3_bottom_left])
+
+        cv2.polylines(frame, [combined_corners.astype(int)], True, (255,0,0), 2)
+
+        if isinstance(at_det_rack_result, list):
+            for at_detections in at_det_rack_result:
+                corners = at_detections.corners
+                tag_id = at_detections.tag_id
+                cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
+                
+                tag_center = tuple(at_detections.center.astype(int))
+                cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+
+            at_det_result = sorted(at_det_rack_result, key=lambda x: x.tag_id)[:4]
+
+            tag_0_top_left = at_det_rack_result[0].corners[0]
+            tag_1_top_right = at_det_rack_result[1].corners[1]
+            tag_2_bottom_right = at_det_rack_result[2].corners[2]
+            tag_3_bottom_left = at_det_rack_result[3].corners[3]
+
+            cv2.circle(frame, tag_0_top_left.astype(int).tolist(), 5, (255, 0, 0), -1)
+            cv2.circle(frame, tag_1_top_right.astype(int).tolist(), 5, (255, 0, 0), -1)
+            cv2.circle(frame, tag_2_bottom_right.astype(int).tolist(), 5, (255, 0, 0), -1)
+            cv2.circle(frame, tag_3_bottom_left.astype(int).tolist(), 5, (255, 0, 0), -1)
+
+            combined_corners = np.stack([tag_0_top_left,
+                                tag_1_top_right,
+                                tag_2_bottom_right, 
+                                tag_3_bottom_left])
+
+            cv2.polylines(frame, [combined_corners.astype(int)], True, (255,0,0), 2)
+
         # Draw the detected circle using cv2
         for i in range(circles_detected.shape[1]):
 
-            center = (int(circles_detected[0][i][0]) + 700, int(circles_detected[0][i][1]) + 300) # Circle center
+            center = (int(circles_detected[0][i][0]), int(circles_detected[0][i][1])) # Circle center
             radius = int(circles_detected[0][i][2])  # Circle radius
             cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
             cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
-            cv2.putText(frame, f"Circle Center: {center}, r:{radius}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.putText(frame, f"Circle Center:  r:{radius}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
         return frame
 
 
-    def process_image_once(self, frame):
-        # print(frame)
+
+    def visualize_atag(self, frame, at_det_result, combined_corners):
+        for at_detections in at_det_result:
+            corners = at_detections.corners
+            tag_id = at_detections.tag_id
+            cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
+            
+            tag_center = tuple(at_detections.center.astype(int))
+            cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+            cv2.polylines(frame, [combined_corners.astype(int)], True, (255,0,0), 2)
+            combined_corners_center = combined_corners.mean(axis=0).astype(int)
+            cv2.putText(frame, f"center: {combined_corners_center}", combined_corners_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,0), 2)
+
+        return frame
+    
+    def visualize_circles(self, frame, circles_detected):
+        for i in range(circles_detected.shape[1]):
+            center = (int(circles_detected[0][i][0]), int(circles_detected[0][i][1])) # Circle center
+            radius = int(circles_detected[0][i][2])  # Circle radius
+            cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
+            cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
+            cv2.putText(frame, f"Circle Center:  r:{radius}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+        return frame
+
+
+    def process_image_once(self, frame, detect_rack= False):
+        # logger.debug(frame)
 
         if isinstance(frame, np.ndarray):
 
             frame_grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            frame_grey_center_crop = frame_grey[300:780, 700:1320] # middle crop of 1920:
-            frame_grey_center_crop_circles = frame_grey[300:1080, 700:1320] # bottom right crop for the pipet tip
+            # frame_grey_center_crop = frame_grey[300:780, 700:1320] # middle crop of 1920:
+            # frame_grey_center_crop_circles = frame_grey[300:1080, 700:1320] # bottom right crop for the pipet tip
+            frame_grey_center_crop_circles = frame_grey
+
 
             try:
                 # apriltag detection
                 at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag16h5"))
-                at_det_result = at_det.detect(frame_grey)
+                at_det_result = sorted(at_det.detect(frame_grey), key=lambda x: x.tag_id)[:4]
 
-                # use a center crop for dmf checker template matching
-                ret_template_matched = match_markers(frame_grey_center_crop, template_a)
+                tag_0_top_left = at_det_result[0].corners[0]
+                tag_1_top_right = at_det_result[1].corners[1]
+                tag_2_bottom_right = at_det_result[2].corners[2]
+                tag_3_bottom_left = at_det_result[3].corners[3]
 
-                # hg_mat, corners, mask, src_pts, dest_pts 
-                if self.template == None:
-                    ret_template_matched =  match_fiducial_orb(
-                        frame_grey_center_crop, template_chip, None, 
-                        min_match_count=1, good_match_ratio=0.75
-                    )
-                    self.template = ret_template_matched[-1] # cache the template keyypoints and descriptors
-                else:
-                    ret_template_matched =  match_fiducial_orb(
-                        frame_grey_center_crop, template_chip, self.template,
-                        min_match_count=1, good_match_ratio=0.75
-                    )
-                ret_template_matched = list(ret_template_matched[:-1])
-                # print(len(ret_template_matched))
+                combined_corners = np.stack([tag_0_top_left,
+                    tag_1_top_right,
+                    tag_2_bottom_right, 
+                    tag_3_bottom_left])
+
+                if detect_rack:
+                    at_det_rack = apriltag.Detector(apriltag.DetectorOptions(families="tag25h9"))
+                    at_det_rack_result = at_det_rack.detect(frame_grey)
+
+                    tag_rack_0_top_left = at_det_rack_result[0].corners[0]
+                    tag_rack_1_top_right = at_det_rack_result[1].corners[1]
+                    tag_rack_2_bottom_right = at_det_rack_result[2].corners[2]
+                    tag_rack_3_bottom_left = at_det_rack_result[3].corners[3]
+
+                    combined_rack_corners = np.stack([tag_rack_0_top_left,
+                        tag_rack_1_top_right,
+                        tag_rack_2_bottom_right, 
+                        tag_rack_3_bottom_left])
+
+                # # use a center crop for dmf checker template matching
+                # ret_template_matched = match_markers(frame_grey_center_crop, template_a)
+
+                # # hg_mat, corners, mask, src_pts, dest_pts 
+                # if self.template == None:
+                #     ret_template_matched =  match_fiducial_orb(
+                #         frame_grey_center_crop, template_chip, None, 
+                #         min_match_count=1, good_match_ratio=0.75
+                #     )
+                #     self.template = ret_template_matched[-1] # cache the template keyypoints and descriptors
+                # else:
+                #     ret_template_matched =  match_fiducial_orb(
+                #         frame_grey_center_crop, template_chip, self.template,
+                #         min_match_count=1, good_match_ratio=0.75
+                #     )
+                # ret_template_matched = list(ret_template_matched[:-1])
+                # logger.debug(len(ret_template_matched))
+                ret_template_matched =[]
 
                 # Hough circle detection
                 frame_grey_center_crop_circle_gauss = cv2.GaussianBlur(frame_grey_center_crop_circles, (7,7,), 2)
@@ -512,27 +599,34 @@ class ImageProcessingWorker(QObject):
                     minDist=200,
                     param1=50,
                     param2=30,
-                    minRadius=10,
-                    maxRadius=45,
+                    minRadius=5,
+                    maxRadius=30,
                 )
             except Exception as exp:
-                print(exp)
+                logger.debug(exp)
                 return
-            
+                    
             template_success, atdet_success, circle_success = (
                 isinstance(ret_template_matched, list), isinstance(at_det_result, list) , isinstance(circles_detected, np.ndarray)
             )
 
             if template_success == True and atdet_success == True and circle_success == True:
-            
-                frame = self.draw_visualization_cv2(
-                    frame, ret_template_matched, at_det_result, circles_detected
-                )
+                try:
+                    # frame = self.draw_visualization_cv2(
+                    #     frame, ret_template_matched, at_det_result, circles_detected, at_det_rack_result
+                    # )
+                    frame = self.visualize_atag(frame, at_det_result, combined_corners)
+                    if detect_rack:
+                        frame = self.visualize_atag(frame, at_det_rack_result, combined_rack_corners)
+                    frame = self.visualize_circles(frame, circles_detected)
+                except Exception as e:
+                    logger.debug(f"visualization failed : {e}")
+                    pass
             else:
-                print(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
+                logger.debug(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
 
             self.frameUpdated.emit(frame) 
-            # print(ret_template_matched)
+            # logger.debug(ret_template_matched)
             self.dataUpdated.emit((ret_template_matched, at_det_result, circles_detected))
             
 
@@ -669,7 +763,7 @@ class WebcamCaptureApp(QWidget):
             # try:
             #     self.ip_client.send_str("HS")
             # except Exception as e:
-            #     print(e)
+            #     logger.debug(e)
             #     pass
 
             # Spatial Processing Worker
