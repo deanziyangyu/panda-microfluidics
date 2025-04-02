@@ -37,6 +37,7 @@ import roboticstoolbox as rtb
 from spatialmath import SE3
 
 FILE_SET = False
+USE_CAMERA = True
 CAMERA_NUM = 4
 
 HOST = '127.0.0.1'  # Server IP address
@@ -60,6 +61,7 @@ log_fname = "_video_capture_server_debug.log"
 vid_fdir  = ""
 vid_dir   = "_rec_vids/"
 vid_fname = "_rec_vids.mp4"
+cap_video_path = "/../misc_files/vid_test.mp4"
 
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
@@ -69,7 +71,7 @@ template_chip = cv2.resize(template_chip, (120, 200))
 
 
 
-def match_fiducial_orb(source, template=None,
+def match_fiducial_orb(source, template,
                        template_kp_desc=None,
                        min_match_count=8, 
                        good_match_ratio=0.75):
@@ -86,7 +88,7 @@ def match_fiducial_orb(source, template=None,
     orb = cv2.ORB_create(
         nfeatures = 200,                    # The maximum number of features to retain.
         scaleFactor = 1.3,                  # Pyramid decimation ratio, greater than 1
-        nlevels = 5,                        # The number of pyramid levels.
+        nlevels = 6,                        # The number of pyramid levels.
         edgeThreshold = 7,                  # This is size of the border where the features are not detected. It should roughly match the patchSize parameter
         firstLevel = 0,                     # It should be 0 in the current implementation.
         WTA_K = 2,                          # The number of points that produce each element of the oriented BRIEF descriptor.
@@ -97,20 +99,17 @@ def match_fiducial_orb(source, template=None,
         patchSize = 7                      
     )
 
-    # Convert images to grayscale (ORB works on grayscale)
-    gray_source = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY) \
-        if len(source.shape) == 3 else source
+
     if isinstance(template_kp_desc, type(None)):
-        gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) \
-            if len(template.shape) == 3 else template
-        kp_template, desc_template = orb.detectAndCompute(gray_template, None)
-        template_kp_desc = (kp_template, desc_template)
-    elif isinstance(template, type(None)):
-        kp_template, desc_template = template_kp_desc
+        kp_template, desc_template = orb.detectAndCompute(template, None)
+        template_shape = template.shape
+        template_kp_desc = (kp_template, desc_template, template_shape)
+    else:
+        kp_template, desc_template, template_shape = template_kp_desc
 
     # 3. Detect keypoints and compute descriptors
     # kp_template, desc_template = orb.detectAndCompute(gray_template, None)
-    kp_source, desc_source = orb.detectAndCompute(gray_source, None)
+    kp_source, desc_source = orb.detectAndCompute(source, None)
 
     # Check if descriptors are valid
     if desc_template is None or desc_source is None:
@@ -144,7 +143,7 @@ def match_fiducial_orb(source, template=None,
         return -1
 
     # 10. Once we have the homography, transform the corners of the template
-    hT, wT = gray_template.shape[:2]
+    hT, wT = template_shape[:2]
     template_corners = np.float32([[0, 0],
                                    [wT, 0],
                                    [wT, hT],
@@ -152,10 +151,7 @@ def match_fiducial_orb(source, template=None,
 
     corners_in_scene = cv2.perspectiveTransform(template_corners, homography)
 
-    if isinstance(template, type(None)):
-        return homography, corners_in_scene.reshape(-1, 2), matches_mask, src_pts, dst_pts, template_kp_desc
-
-    return homography, corners_in_scene.reshape(-1, 2), matches_mask, src_pts, dst_pts, None
+    return homography, corners_in_scene.reshape(-1, 2), matches_mask, src_pts, dst_pts, template_kp_desc
 
 
 
@@ -427,13 +423,19 @@ class ImageProcessingWorker(QObject):
         #                     top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
         #     matched_num +=1
 
-        hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
-        # draw the corners bounding box
-        for i in range(len(mask)):
-            if mask[i] == 1:
-                cv2.circle(frame, tuple(dest_pts[i,0].astype(int)), 5, (255,0,0), -1)
+        # ORB based template matching
+        try:
+            hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
+            # draw the corners bounding box
+            for i in range(len(mask)):
+                if mask[i] == 1:
+                    cv2.circle(frame, tuple(dest_pts[i,0].astype(int) + np.array([300, 700])), 5, (0,0,255), -1)
+                    cv2.circle(frame, tuple(src_pts[i,0].astype(int) + np.array([300, 700])), 5, (255,0,0), -1)
 
-        cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
+            cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
+
+        except:
+            pass
 
         # frame = frame_center_crop.copy()
         # for i in range(4):
@@ -480,14 +482,14 @@ class ImageProcessingWorker(QObject):
 
             try:
                 # apriltag detection
-                at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag36h11"))
+                at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag16h5"))
                 at_det_result = at_det.detect(frame_grey)
 
                 # use a center crop for dmf checker template matching
                 ret_template_matched = match_markers(frame_grey_center_crop, template_a)
 
                 # hg_mat, corners, mask, src_pts, dest_pts 
-                if self.template is None:
+                if self.template == None:
                     ret_template_matched =  match_fiducial_orb(
                         frame_grey_center_crop, template_chip, None, 
                         min_match_count=1, good_match_ratio=0.75
@@ -495,7 +497,7 @@ class ImageProcessingWorker(QObject):
                     self.template = ret_template_matched[-1] # cache the template keyypoints and descriptors
                 else:
                     ret_template_matched =  match_fiducial_orb(
-                        frame_grey_center_crop, None, self.template, 
+                        frame_grey_center_crop, template_chip, self.template,
                         min_match_count=1, good_match_ratio=0.75
                     )
                 ret_template_matched = list(ret_template_matched[:-1])
@@ -545,12 +547,29 @@ class VideoCaptureWorker(QObject):
         self.running = True
         self.timestamp = ""
         self.filename = ""
-        self.capture = cv2.VideoCapture(CAMERA_NUM, cv2.CAP_V4L2) # Direct Show for MS Windows
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        self.capture.set(cv2.CAP_PROP_EXPOSURE, -6)
-        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-        self.capture.set(cv2.CAP_PROP_FPS, 1)
+
+        self.cap_api = None
+        if sys.platform == "linux":
+            self.cap_api = cv2.CAP_V4L2
+        elif sys.platform == "win32":
+            self.cap_api = cv2.CAP_DSHOW
+        elif sys.platform == "darwin":
+            self.cap_api = cv2.CAP_AVFOUNDATION
+        else:
+            self.cap_api = cv2.CAP_ANY
+
+        if USE_CAMERA:
+            self.capture = cv2.VideoCapture(CAMERA_NUM, self.cap_api) # Direct Show for MS Windows
+            self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.capture.set(cv2.CAP_PROP_EXPOSURE, -6)
+            self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+            self.capture.set(cv2.CAP_PROP_FPS, 1)
+        else:
+            self.capture = cv2.VideoCapture(str(source_dir) + cap_video_path,)
+            self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+            self.capture.set(cv2.CAP_PROP_FPS, 1)
+
         _, frame = self.capture.read()
         fshape = frame.shape
         self.fheight = fshape[0]
