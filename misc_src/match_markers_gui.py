@@ -65,10 +65,9 @@ cap_video_path = "/../misc_files/20250401_214655_rec_vids.mp4"
 
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
-template_a = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_a.png", cv2.IMREAD_GRAYSCALE)
-template_chip = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_chip.png", cv2.IMREAD_GRAYSCALE)
-template_chip = cv2.resize(template_chip, (120, 200))
-
+# template_a = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_a.png", cv2.IMREAD_GRAYSCALE)
+# template_chip = cv2.imread(f"{source_dir}/../misc_files/fiducial_template_chip.png", cv2.IMREAD_GRAYSCALE)
+# template_chip = cv2.resize(template_chip, (120, 200))
 
 
 def match_fiducial_orb(source, template,
@@ -214,13 +213,6 @@ class SocketCommClient:
         self.client_socket = None
         self.host = HOST
         self.port = PORT_CLIENT
-        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # # Reuse IP:PORT if available
-        # self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # self.server_socket.bind((HOST, PORT))
-        # self.server_socket.listen(1)
-        # self.server_socket.settimeout(20)
-        # data = self.client_socket.recv(1024).decode('utf-8')
 
     def sendall(self, data):
         while data:
@@ -233,19 +225,22 @@ class SocketCommClient:
             self.client_socket.connect((self.host, self.port))
         try:
             self.sendall(bytes("STR$$$$"+send_str, 'utf-8'))
-            logger.debug("Send STR --> 127.0.0.1:12345")
+            logger.debug(f"Send STR --> {self.host}:{self.port}")
         except Exception as e:
             logger.debug(e)
     
     def send_pose_rpy(self, xyz, rpy):
+        """
+        Send the pose in the form of a dictionary with keys 'x', 'y', 'z', and 'rpy'.
         # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
+        """
         send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "rpy": {rpy}}}'
         if not self.client_socket:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
         try:
             self.sendall(bytes("POSERPY$"+send_str, 'utf-8'))
-            logger.debug("Send STR --> 127.0.0.1:12345")
+            logger.debug(f"Send STR --> {self.host}:{self.port}")
         except Exception as e:
             logger.debug(e)
 
@@ -259,6 +254,60 @@ class SpatialProcessingWorker(QObject):
         super().__init__(parent)
         self.running = True
         self.robot = rtb.models.Panda()
+        # physical dimensions of the chip and rack
+        self.corners_phy_meter_chip = np.array([[0., 0.], [0.028, 0.], [0.028, 0.023], [0., 0.023]])
+        self.corners_phy_meter_rack = np.array([[0., 0.], [0.081, 0.], [0.081, 0.1215], [0., 0.1215]])
+
+        # camera intrinsics for Realsense D415
+        width, height = 1920, 1080
+        ppx = 951.094909667969
+        ppy = 529.039794921875
+        fx = 1366.31372070312
+        fy = 1363.66088861788
+        fov_deg = (70.18, 43.2)
+        distortion = "inverse brown conrady"
+
+        self.camera_K = np.array([
+            [fx, 0, ppx],
+            [0, fy, ppy],
+            [0, 0, 1]
+        ])
+
+        # calibration matrix HAND_EYE_TSAI for realsense D415
+        self.T_ee_cam =  SE3(
+            [[ 0.01212702, -0.9994259,  0.03163564,  0.0537774 ],
+            [ 0.99985468,  0.01174098, -0.01236027, -0.03114828],
+            [ 0.01198174, 0.03178094,  0.99942304, -0.05437236],
+            [ 0.,          0.,          0. ,         1.        ]]
+        )
+
+    def compute_item_pose_base(self, H, K, T_base_cam):
+        # Decompose homography to get rotation and translation
+        H_normalized = np.linalg.inv(K) @ H
+        H_normalized /= np.linalg.norm(H_normalized[:, 0])
+        
+        r1, r2, t = H_normalized[:, 0], H_normalized[:, 1], H_normalized[:, 2]
+        r3 = np.cross(r1, r2)
+        R_cam_to_item = np.column_stack((r1, r2, r3))
+        
+        # Ensure orthogonal rotation matrix
+        U, _, Vt = np.linalg.svd(R_cam_to_item)
+        R_cam_to_item = U @ Vt
+        
+        # Item's rotation in camera frame (yaw)
+        yaw_cam = np.arctan2(R_cam_to_item[1,0], R_cam_to_item[0,0])
+        
+        # Item's position in camera frame (origin of item's plane)
+        item_pos_cam = -R_cam_to_item.T @ t  # Homography translation adjustment
+        
+        # Transform item pose to base frame
+        item_pos_base = T_base_cam * item_pos_cam
+        item_rot_base = T_base_cam.R @ R_cam_to_item.T
+        
+        # Extract yaw in base frame
+        yaw_base = np.arctan2(item_rot_base[1,0], item_rot_base[0,0])
+        return item_pos_base, yaw_base
+
 
     def run(self):
         while self.running:
@@ -268,6 +317,41 @@ class SpatialProcessingWorker(QObject):
     def stop_processing(self):
         self.running = False
         self.finished.emit()
+
+    def compute_homography(self, corners_in_scene, corners_phy_meter):
+        # Compute the homography matrix
+        h, status = cv2.findHomography(corners_phy_meter, corners_in_scene)
+        return h
+    
+    def compute_pose(self, homography, q_current):
+        # Compute the pose of the item in the camera frame
+        # Compute the pose of the item in the base frame
+
+        # Current end-effector and camera poses
+        # T_base_ee = robot.fkine(q_current)
+        T_base_ee = self.robot.fkine(q_current)
+        T_base_cam = T_base_ee * self.T_ee_cam
+
+        # Compute item's base pose
+        item_pos_base, item_yaw_base = self.compute_item_pose_base(
+            homography, self.camera_K, T_base_cam
+        )
+
+        # Desired gripper pose (orthogonal orientation)
+        # desired_yaw = item_yaw_base # 90° offset
+        desired_yaw = item_yaw_base + np.pi
+        desired_pos = np.append(item_pos_base[:2], T_base_ee.t[2])  # Keep current height
+        desired_pose = SE3(desired_pos) * SE3.Rz(desired_yaw) * SE3.Rx(-np.pi)
+
+        # Solve inverse kinematics
+        sol = self.robot.ikine_LM(desired_pose, q0=q_current, tol=1e-6,)
+
+        if sol.success:
+            logger.debug("IK success for orthogonal pose")
+            return desired_pose, sol.q
+        else:
+            logger.debug("IK failed to converge")
+            return desired_pose, None
 
 class ClientHandlingWorker(QObject):
     """Continuously Listen to & Receive from Client
@@ -408,103 +492,6 @@ class ImageProcessingWorker(QObject):
         self.running = False
         self.finished.emit()
 
-    def draw_visualization_cv2(self, frame, ret_template_matched, at_det_result, circles_detected,  at_det_rack_result = None,):
-        """
-        Draw the matched templates, detected apriltags, and detected circles on the frame using cv2
-        """
-
-        # Draw the matched templates using cv2
-        # matched_num = 0
-        # for _, top_left, (h,w) in ret_template_matched:
-        #     top_left = (top_left[0] + 700, top_left[1] + 300)
-        #     bottom_right = (top_left[0] + w, top_left[1] + h)
-        #     cv2.rectangle(frame, top_left, bottom_right, 255, 2)
-        #     cv2.putText(frame, f"{len(ret_template_matched)-matched_num}",
-        #                     top_left, cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-        #     matched_num +=1
-
-        # ORB based template matching
-        # try:
-        #     hg_mat, corners, mask, src_pts, dest_pts  = ret_template_matched
-        #     # draw the corners bounding box
-        #     for i in range(len(mask)):
-        #         if mask[i] == 1:
-        #             cv2.circle(frame, tuple(dest_pts[i,0].astype(int) + np.array([300, 700])), 5, (0,0,255), -1)
-        #             cv2.circle(frame, tuple(src_pts[i,0].astype(int) + np.array([300, 700])), 5, (255,0,0), -1)
-
-        #     cv2.polylines(frame, [corners.astype(int)+ np.array([300, 700])], True, (0,255,0), 2)
-
-        # except:
-        #     pass
-
-
-        # Draw the detected apriltags using cv2
-        for at_detections in at_det_result:
-            corners = at_detections.corners
-            tag_id = at_detections.tag_id
-            cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
-            
-            tag_center = tuple(at_detections.center.astype(int))
-            cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-
-        at_det_result = sorted(at_det_result, key=lambda x: x.tag_id)[:4]
-        tag_0_top_left = at_det_result[0].corners[0]
-        tag_1_top_right = at_det_result[1].corners[1]
-        tag_2_bottom_right = at_det_result[2].corners[2]
-        tag_3_bottom_left = at_det_result[3].corners[3]
-
-        cv2.circle(frame, tag_0_top_left.astype(int).tolist(), 5, (255, 0, 0), -1)
-        cv2.circle(frame, tag_1_top_right.astype(int).tolist(), 5, (255, 0, 0), -1)
-        cv2.circle(frame, tag_2_bottom_right.astype(int).tolist(), 5, (255, 0, 0), -1)
-        cv2.circle(frame, tag_3_bottom_left.astype(int).tolist(), 5, (255, 0, 0), -1)
-
-        combined_corners = np.stack([tag_0_top_left,
-                            tag_1_top_right,
-                            tag_2_bottom_right, 
-                            tag_3_bottom_left])
-
-        cv2.polylines(frame, [combined_corners.astype(int)], True, (255,0,0), 2)
-
-        if isinstance(at_det_rack_result, list):
-            for at_detections in at_det_rack_result:
-                corners = at_detections.corners
-                tag_id = at_detections.tag_id
-                cv2.polylines(frame, [corners.astype(int)], True, (0,255,0), 2)
-                
-                tag_center = tuple(at_detections.center.astype(int))
-                cv2.putText(frame, f"tagid:{tag_id}", tag_center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-
-            at_det_result = sorted(at_det_rack_result, key=lambda x: x.tag_id)[:4]
-
-            tag_0_top_left = at_det_rack_result[0].corners[0]
-            tag_1_top_right = at_det_rack_result[1].corners[1]
-            tag_2_bottom_right = at_det_rack_result[2].corners[2]
-            tag_3_bottom_left = at_det_rack_result[3].corners[3]
-
-            cv2.circle(frame, tag_0_top_left.astype(int).tolist(), 5, (255, 0, 0), -1)
-            cv2.circle(frame, tag_1_top_right.astype(int).tolist(), 5, (255, 0, 0), -1)
-            cv2.circle(frame, tag_2_bottom_right.astype(int).tolist(), 5, (255, 0, 0), -1)
-            cv2.circle(frame, tag_3_bottom_left.astype(int).tolist(), 5, (255, 0, 0), -1)
-
-            combined_corners = np.stack([tag_0_top_left,
-                                tag_1_top_right,
-                                tag_2_bottom_right, 
-                                tag_3_bottom_left])
-
-            cv2.polylines(frame, [combined_corners.astype(int)], True, (255,0,0), 2)
-
-        # Draw the detected circle using cv2
-        for i in range(circles_detected.shape[1]):
-
-            center = (int(circles_detected[0][i][0]), int(circles_detected[0][i][1])) # Circle center
-            radius = int(circles_detected[0][i][2])  # Circle radius
-            cv2.circle(frame, center, radius, (0, 255, 255), 3)  # Draw the circle's perimeter
-            cv2.circle(frame, center, 3, (255, 0, 0), -1)  # Draw the circle's center
-            cv2.putText(frame, f"Circle Center:  r:{radius}", center, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-        return frame
-
-
 
     def visualize_atag(self, frame, at_det_result, combined_corners):
         for at_detections in at_det_result:
@@ -534,6 +521,9 @@ class ImageProcessingWorker(QObject):
     def process_image_once(self, frame, detect_rack= False):
         # logger.debug(frame)
 
+        combined_corners = None
+        combined_rack_corners = None
+
         if isinstance(frame, np.ndarray):
 
             frame_grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -556,7 +546,8 @@ class ImageProcessingWorker(QObject):
                     tag_1_top_right,
                     tag_2_bottom_right, 
                     tag_3_bottom_left])
-
+                
+                at_det_rack_result = []
                 if detect_rack:
                     at_det_rack = apriltag.Detector(apriltag.DetectorOptions(families="tag25h9"))
                     at_det_rack_result = at_det_rack.detect(frame_grey)
@@ -588,7 +579,6 @@ class ImageProcessingWorker(QObject):
                 #     )
                 # ret_template_matched = list(ret_template_matched[:-1])
                 # logger.debug(len(ret_template_matched))
-                ret_template_matched =[]
 
                 # Hough circle detection
                 frame_grey_center_crop_circle_gauss = cv2.GaussianBlur(frame_grey_center_crop_circles, (7,7,), 2)
@@ -605,16 +595,14 @@ class ImageProcessingWorker(QObject):
             except Exception as exp:
                 logger.debug(exp)
                 return
-                    
-            template_success, atdet_success, circle_success = (
-                isinstance(ret_template_matched, list), isinstance(at_det_result, list) , isinstance(circles_detected, np.ndarray)
+            
+            atdet_success, circle_success = (
+                isinstance(at_det_result, list) , isinstance(circles_detected, np.ndarray)
             )
 
-            if template_success == True and atdet_success == True and circle_success == True:
+            if atdet_success == True and circle_success == True:
                 try:
-                    # frame = self.draw_visualization_cv2(
-                    #     frame, ret_template_matched, at_det_result, circles_detected, at_det_rack_result
-                    # )
+
                     frame = self.visualize_atag(frame, at_det_result, combined_corners)
                     if detect_rack:
                         frame = self.visualize_atag(frame, at_det_rack_result, combined_rack_corners)
@@ -623,12 +611,16 @@ class ImageProcessingWorker(QObject):
                     logger.debug(f"visualization failed : {e}")
                     pass
             else:
-                logger.debug(f"INFO: Values partially extracted: template {template_success}; atag {atdet_success}; circle {circle_success}")
+                logger.debug(f"INFO: Values partially extracted: atag {atdet_success}; circle {circle_success}")
 
             self.frameUpdated.emit(frame) 
             # logger.debug(ret_template_matched)
-            self.dataUpdated.emit((ret_template_matched, at_det_result, circles_detected))
-            
+            self.dataUpdated.emit((at_det_result,
+                                   combined_corners,
+                                   at_det_rack_result,
+                                    combined_rack_corners,
+                                   circles_detected))
+      
 
 class VideoCaptureWorker(QObject):
     """Capture and Save opencv cam port to the required Spec"""
@@ -724,6 +716,12 @@ class WebcamCaptureApp(QWidget):
 
         self.init_ui()
 
+        (self.at_det_result,
+        self.combined_corners,
+        self.at_det_rack_result,
+        self.combined_rack_corners,
+        self.circles_detected) = None, None, None, None, None
+
         try:
             # Video Capture Worker
             self.video_worker = VideoCaptureWorker()
@@ -757,18 +755,20 @@ class WebcamCaptureApp(QWidget):
             self.image_processing_worker.moveToThread(self.image_processing_thread)
             self.image_processing_thread.started.connect(self.image_processing_worker.run)
             self.image_processing_worker.frameUpdated.connect(self.update_video)
+            # while this is potentially dangerous for thread contention, we dont have a choice
+            self.image_processing_worker.dataUpdated.connect(self.rec_extracted_features)
             self.image_processing_thread.start()
 
             self.ip_client = SocketCommClient()
-            # try:
-            #     self.ip_client.send_str("HS")
-            # except Exception as e:
-            #     logger.debug(e)
-            #     pass
+            try:
+                self.ip_client.send_str("HS")
+            except Exception as e:
+                logger.debug(e)
+                pass
 
             # Spatial Processing Worker
-            # self.spatial_processing_worker = SpatialProcessingWorker()
-            # self.client_handler.jointPosUpdated.connect()
+            self.spatial_processing_worker = SpatialProcessingWorker()
+            self.client_handler.jointPosUpdated.connect(self.compute_and_send_pose)
 
         except KeyboardInterrupt:
             logger.debug("Keyboard interrupt received. Shutting down webcam server...")
@@ -816,6 +816,35 @@ class WebcamCaptureApp(QWidget):
     def rec_timestamp(self, recv):
         status_str = "Pick Started: " if recv[0] == "ON" else "Pick Finished: "
         self.rec_timestamp_label.setText(status_str + recv[1])
+
+    def compute_and_send_pose(self, recv):
+        ret = self.spatial_processing_worker.compute_pose((self.at_det_result,
+        self.combined_corners,
+        self.at_det_rack_result,
+        self.combined_rack_corners,
+        self.circles_detected), recv)
+        desired_pose, sol = ret
+        if not isinstance(sol, type(None)):
+            try:
+                if isinstance(desired_pose, np.ndarray):
+                    desired_pose  = SE3(desired_pose)
+                elif isinstance(desired_pose, SE3):
+                    pass
+                self.ip_client.send_pose_rpy(desired_pose.t, desired_pose.rpy())
+            except Exception as e:
+                logger.debug(e)
+                pass
+        else:
+            logger.debug("MAIN: IK failed to converge")
+
+
+    def rec_extracted_features(self, recv):
+        (self.at_det_result,
+        self.combined_corners,
+        self.at_det_rack_result,
+        self.combined_rack_corners,
+        self.circles_detected) = recv
+
 
     def rec_video_updated(self, recv):
         if recv[0] == "ON":
