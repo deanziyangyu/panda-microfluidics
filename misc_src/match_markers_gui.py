@@ -18,6 +18,7 @@ Shell launch cmd from other .py program:
 import os
 import sys
 import time
+import json
 import socket
 import logging
 import datetime
@@ -224,7 +225,7 @@ class SocketCommClient:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
         try:
-            self.sendall(bytes("STR$$$$"+send_str, 'utf-8'))
+            self.sendall(bytes("STR$$$$$"+send_str, 'utf-8'))
             logger.debug(f"Send STR --> {self.host}:{self.port}")
         except Exception as e:
             logger.debug(e)
@@ -234,7 +235,7 @@ class SocketCommClient:
         Send the pose in the form of a dictionary with keys 'x', 'y', 'z', and 'rpy'.
         # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
         """
-        send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "rpy": {rpy}}}'
+        send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "r": {rpy[0]}, "p": {rpy[1]}, "y": {rpy[2]}}}'
         if not self.client_socket:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
@@ -321,7 +322,7 @@ class SpatialProcessingWorker(QObject):
     def compute_homography(self, corners_in_scene, corners_phy_meter):
         # Compute the homography matrix
         h, status = cv2.findHomography(corners_phy_meter, corners_in_scene)
-        return h
+        return h, status
     
     def compute_pose(self, homography, q_current):
         # Compute the pose of the item in the camera frame
@@ -417,14 +418,52 @@ class ClientHandlingWorker(QObject):
 
                     elif data[:8] == 'JOINTPOS':
                         joint_pos_str = data[8:]
-                        logger.debug(joint_pos_str)
-                        self.jointPosUpdated.emit([joint_pos_str, stamp])
+                        calc_pos = ""
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
                         if FILE_SET:
                             with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
                                 f_csv = csv.writer(fhdl)
                                 f_csv.writerow([stamp, joint_pos_str])
                         else:
                             logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC0':
+                        joint_pos_str = data[8:]
+                        calc_pos = "chip"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC1':
+                        joint_pos_str = data[8:]
+                        calc_pos = "rack"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC2':
+                        joint_pos_str = data[8:]
+                        calc_pos = "drop"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
 
                     # elif data[:8] == 'FNAME$$$':
                     #     self.fileUpdated.emit("")
@@ -446,6 +485,10 @@ class ClientHandlingWorker(QObject):
                     #             f_csv.writerow([stamp,f"NEWPICKID:{picking_id}"])
                     #     else:
                     #         logger.debug("Need to Create File Objects before Logging !!")
+
+                    elif data[:8] == 'STR$$$$$':
+                        logger.debug("GET STR %r at %r", data[8:], stamp)
+                    
                     elif data == '':
                         pass
                     else:
@@ -761,7 +804,7 @@ class WebcamCaptureApp(QWidget):
 
             self.ip_client = SocketCommClient()
             try:
-                self.ip_client.send_str("HS")
+                self.ip_client.send_str("Webcam Capture Viewer Started.")
             except Exception as e:
                 logger.debug(e)
                 pass
@@ -818,24 +861,43 @@ class WebcamCaptureApp(QWidget):
         self.rec_timestamp_label.setText(status_str + recv[1])
 
     def compute_and_send_pose(self, recv):
-        ret = self.spatial_processing_worker.compute_pose((self.at_det_result,
-        self.combined_corners,
-        self.at_det_rack_result,
-        self.combined_rack_corners,
-        self.circles_detected), recv)
-        desired_pose, sol = ret
-        if not isinstance(sol, type(None)):
-            try:
-                if isinstance(desired_pose, np.ndarray):
-                    desired_pose  = SE3(desired_pose)
-                elif isinstance(desired_pose, SE3):
-                    pass
+        joint_pos_str, stamp, calc_pos = recv
+
+        if calc_pos != "":
+            # convert string to array
+            recv_arr = np.array(json.loads(joint_pos_str))
+
+            if calc_pos == "chip":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_chip, self.combined_corners, 
+                )
+            elif calc_pos == "rack":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_rack, self.combined_rack_corners, 
+                )
+            elif calc_pos == "drop":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_chip, self.combined_corners, 
+                )
+            # print(h, status)
+            if status.all() == False:
+                logger.debug("Homography computation failed")
+            else:
+                desired_pose, sol = self.spatial_processing_worker.compute_pose(h, recv_arr)
                 self.ip_client.send_pose_rpy(desired_pose.t, desired_pose.rpy())
-            except Exception as e:
-                logger.debug(e)
-                pass
-        else:
-            logger.debug("MAIN: IK failed to converge")
+                print(desired_pose, sol)
+            if not isinstance(sol, type(None)):
+                try:
+                    if isinstance(desired_pose, np.ndarray):
+                        desired_pose  = SE3(desired_pose)
+                    elif isinstance(desired_pose, SE3):
+                        pass
+                    self.ip_client.send_pose_rpy(desired_pose.t, desired_pose.rpy())
+                except Exception as e:
+                    logger.debug(e)
+                    pass
+            else:
+                logger.debug("MAIN: IK failed to converge")
 
 
     def rec_extracted_features(self, recv):
