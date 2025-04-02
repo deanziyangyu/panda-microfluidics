@@ -342,7 +342,9 @@ class SpatialProcessingWorker(QObject):
         # desired_yaw = item_yaw_base # 90° offset
         desired_yaw = item_yaw_base + np.pi
         desired_pos = np.append(item_pos_base[:2], T_base_ee.t[2])  # Keep current height
-        desired_pose = SE3(desired_pos) * SE3.Rz(desired_yaw) * SE3.Rx(-np.pi)
+        desired_pose_T = SE3(desired_pos) * SE3.Rz(desired_yaw) * SE3.Rx(-np.pi)
+        desired_pose = desired_pose_T.copy()  # avoid modifying original
+        desired_pose.t[2] = T_base_ee.t[2]
 
         # Solve inverse kinematics
         sol = self.robot.ikine_LM(desired_pose, q0=q_current, tol=1e-6,)
