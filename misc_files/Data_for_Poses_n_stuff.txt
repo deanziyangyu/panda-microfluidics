@@ -1,0 +1,132 @@
+ros2 launch franka_gripper gripper.launch.py robot_ip:=192.168.1.107
+ros2 run franka_ros2_csc379 run_franka_impedance_control_ros2 
+
+Slightly Above Pipette:
+initial Joint pos [ 0.08392724  0.65863559  0.88282196 -1.44607387 -0.51607189  1.79360181
+  1.7871763 ]
+fk matrix    0.9993    0.01088  -0.03647   0.5081    
+   0.008749 -0.9983   -0.05796   0.4531    
+  -0.03704   0.05759  -0.9977    0.2933    
+   0         0         0         1         
+
+Origin rotation rpy [3.08392627 0.03704589 0.00875532]
+Origin translation [0.50813253 0.45309242 0.29333612]
+
+
+Pickup Pipette:
+initial Joint pos [ 0.10665186  0.78125132  0.79928242 -1.56403597 -0.60438197  1.99854486
+  1.83208292]
+fk matrix    0.9987    0.01826  -0.04756   0.5072    
+   0.01515  -0.9978   -0.06494   0.4497    
+  -0.04864   0.06414  -0.9968    0.1723    
+   0         0         0         1         
+
+Origin rotation rpy [3.07733414 0.04865573 0.01516874]
+Origin translation [0.50721267 0.44974984 0.17228899]
+
+
+Pickup Device 1:
+initial Joint pos [ 0.17615997  0.78776473  0.34810074 -1.88649316 -0.38730545  2.50600192
+  1.55563209]
+fk matrix    0.9953   -0.001501 -0.09645   0.5153    
+  -0.003963 -0.9997   -0.02535   0.3037    
+  -0.09638   0.02561  -0.995    -0.00511   
+   0         0         0         1         
+
+Origin rotation rpy [ 3.11585912  0.09652705 -0.00398202]
+Origin translation [ 0.51531073  0.30373456 -0.00510984]
+
+Device View pose: 
+initial Joint pos [ 0.13221747  0.27428757  0.48116831 -2.17921678 -0.23556797  2.35521001
+  1.5223894 ]
+fk matrix    0.9991    0.03748  -0.0216    0.4515    
+   0.03604  -0.9973   -0.06364   0.3079    
+  -0.02392   0.0628   -0.9977    0.1691    
+   0         0         0         1         
+
+Origin rotation rpy [3.07873197 0.02392462 0.03605678]
+Origin translation [0.45149469 0.30787636 0.16908954]
+
+Right Above Device (xy match) prob not needed:
+initial Joint pos [ 0.0973128   0.43224232  0.48596056 -1.92389406 -0.24285749  2.23150608
+  1.47799659]
+fk matrix    0.9982    0.01619  -0.05758   0.5185    
+   0.01457  -0.9995   -0.02846   0.3176    
+  -0.05801   0.02757  -0.9979    0.1796    
+   0         0         0         1         
+
+Origin rotation rpy [3.11397429 0.05804477 0.01459127]
+Origin translation [0.51849745 0.31763884 0.17961931]
+
+Placement of Device:
+initial Joint pos [-0.37410682  0.66102567  0.4040733  -2.17860319 -0.58851263  2.65233596
+  1.26067877]
+fk matrix    0.9969    0.02784  -0.07298   0.5199    
+   0.02664  -0.9995   -0.01729   0.04662   
+  -0.07343   0.01529  -0.9972   -0.004476  
+   0         0         0         1         
+
+Origin rotation rpy [3.12626025 0.07349211 0.0267179 ]
+Origin translation [ 0.51994441  0.04661575 -0.00447576]
+
+Pipette over hole (dispensing):
+initial Joint pos [-0.3653601   0.3733722   0.45411027 -2.20815074 -0.27371639  2.45975217
+  1.07001568]
+fk matrix    0.9978    0.003043 -0.06656   0.5356    
+   0.002051 -0.9999   -0.01497   0.05044   
+  -0.0666    0.0148   -0.9977    0.116     
+   0         0         0         1         
+
+Origin rotation rpy [3.12676395e+00 6.66506372e-02 2.05569945e-03]
+Origin translation [0.53560231 0.05044304 0.11600472]
+
+Pipette over hole (slightly above and viewing device):
+initial Joint pos [-0.37043424 -0.08761348  0.47809342 -2.3003573   0.02309141  2.14407715
+  0.86385094]
+fk matrix    0.997     0.01383  -0.0756    0.4815    
+   0.01167  -0.9995   -0.02891   0.05174   
+  -0.07596   0.02794  -0.9967    0.2704    
+   0         0         0         1         
+
+Origin rotation rpy [3.11356345 0.07603184 0.01170821]
+Origin translation [0.48150548 0.05173953 0.27043743]
+
+
+Camera to EE stuff:
+Output of calibration for solver: HAND_EYE_ANDREFF is: [[ 0.00878689 -0.99943456  0.0324553   0.03283856]
+ [ 0.99990276  0.00843028 -0.01110836 -0.02219058]
+ [ 0.01082847  0.03254975  0.99941146 -0.03085028]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03255741401632708, -0.01082867911627902, 1.562008804269254)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.08316796 -0.1384263   0.07380188],[4.19473476 3.96356819 1.17557445])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([-0.10882394 -0.92877856 -0.14629846],[6.20254487 6.15009946 2.03623251])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_DANIILIDIS is: [[ 0.00840699 -0.99952922  0.02950712  0.05400489]
+ [ 0.99991606  0.00811199 -0.01010311 -0.03151746]
+ [ 0.009859    0.02958958  0.99951351 -0.05572089]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.029595338378417095, -0.009859155697382148, 1.5623888321164903)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.17768624 -0.16251095  0.07060363],[4.17607572 3.88822303 1.26746052])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.17960348 0.17299645 0.2552951 ],[3.07046867 3.82017923 1.03675882])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_HORAUD is: [[ 0.00785649 -0.99945007  0.03221546  0.05430214]
+ [ 0.99991112  0.00750493 -0.01101918 -0.03194078]
+ [ 0.01077135  0.03229916  0.9994202  -0.05441646]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03230665737060011, -0.010771557440139495, 1.5629392975544338)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.09204834 -0.13995284  0.06552373],[4.19932878 3.95071097 1.18174215])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.20255591 0.18852395 0.24067476],[3.06374867 3.80812617 1.01466224])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_PARK is: [[ 0.00686541 -0.99948874  0.03122687  0.05432225]
+ [ 0.99992217  0.00653638 -0.01062661 -0.03190439]
+ [ 0.01041706  0.0312974   0.99945583 -0.05437494]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.031304205953649036, -0.010417252842212529, 1.5639304880095866)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.12507663 -0.14906674  0.05672666],[4.19864819 3.91843167 1.2112785 ])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.2018266  0.18879366 0.23801953],[3.07239566 3.81165701 1.01959869])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_TSAI is: [[ 0.01212702 -0.9994259   0.03163564  0.0537774 ]
+ [ 0.99985468  0.01174098 -0.01236027 -0.03114828]
+ [ 0.01198174  0.03178094  0.99942304 -0.05437236]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03178857363829337, -0.011982023572518631, 1.5586681357194645)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.09846636 -0.10301283  0.10438672],[4.19147479 3.97279019 1.1942315 ])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.16025029 0.162964   0.23883865],[3.04668343 3.81525046 1.03370495])
+root@micropc:~/git/robot_toolkit# 
+
