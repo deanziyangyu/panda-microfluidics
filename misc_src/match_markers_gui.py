@@ -63,6 +63,7 @@ vid_fdir  = ""
 vid_dir   = "_rec_vids/"
 vid_fname = "_rec_vids.mp4"
 cap_video_path = "/../misc_files/20250401_214655_rec_vids.mp4"
+use_tag_rack = False
 
 
 # source = cv2.imread("fiducial_test.png", cv2.IMREAD_GRAYSCALE)
@@ -235,7 +236,7 @@ class SocketCommClient:
         Send the pose in the form of a dictionary with keys 'x', 'y', 'z', and 'rpy'.
         # Expected format: {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
         """
-        send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "rpy": {rpy}}}'
+        send_str = f'{{"x": {xyz[0]}, "y": {xyz[1]}, "z": {xyz[2]}, "r": {rpy[0]}, "p": {rpy[1]}, "y": {rpy[2]}}}'
         if not self.client_socket:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
@@ -342,7 +343,9 @@ class SpatialProcessingWorker(QObject):
         # desired_yaw = item_yaw_base # 90° offset
         desired_yaw = item_yaw_base + np.pi
         desired_pos = np.append(item_pos_base[:2], T_base_ee.t[2])  # Keep current height
-        desired_pose = SE3(desired_pos) * SE3.Rz(desired_yaw) * SE3.Rx(-np.pi)
+        desired_pose_T = SE3(desired_pos) * SE3.Rz(desired_yaw) * SE3.Rx(-np.pi)
+        desired_pose = desired_pose_T.copy()  # avoid modifying original
+        desired_pose.t[2] = T_base_ee.t[2]
 
         # Solve inverse kinematics
         sol = self.robot.ikine_LM(desired_pose, q0=q_current, tol=1e-6,)
@@ -383,7 +386,8 @@ class ClientHandlingWorker(QObject):
                     data = self.client_socket.recv(1024).decode('utf-8')
                     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-                    global FILE_SET
+                    global FILE_SET, use_tag_rack
+                    
                     if data[:8] == 'PIKSTART':
                         logger.debug("START Pick at %r", data[8:])
                         self.stampUpdated.emit(["ON", data[8:]])
@@ -410,6 +414,17 @@ class ClientHandlingWorker(QObject):
                         else:
                             logger.debug("Need to Create File Objects before Recording !!")
 
+                    elif data[:6] == 'CHGTAG':
+                        joint_pos_str = data[8:]
+                        use_tag_rack  = not use_tag_rack
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, 'CHGTAG'])
+                        else:
+                            logger.debug("Need to Create File Objects before Logging !!")
+
+ 
                     elif data == 'RECSTOP':
                         if FILE_SET:
                             self.recStatusUpdated.emit(["OFF", stamp])
@@ -418,14 +433,52 @@ class ClientHandlingWorker(QObject):
 
                     elif data[:8] == 'JOINTPOS':
                         joint_pos_str = data[8:]
-                        logger.debug(joint_pos_str)
-                        self.jointPosUpdated.emit([joint_pos_str, stamp])
+                        calc_pos = ""
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
                         if FILE_SET:
                             with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
                                 f_csv = csv.writer(fhdl)
                                 f_csv.writerow([stamp, joint_pos_str])
                         else:
                             logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC0':
+                        joint_pos_str = data[8:]
+                        calc_pos = "chip"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC1':
+                        joint_pos_str = data[8:]
+                        calc_pos = "rack"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
+                    elif data[:8] == 'JNTCALC2':
+                        joint_pos_str = data[8:]
+                        calc_pos = "drop"
+                        self.jointPosUpdated.emit([joint_pos_str, stamp, calc_pos])
+                        if FILE_SET:
+                            with open(csv_fpath,'a',newline='', encoding='utf8') as fhdl:
+                                f_csv = csv.writer(fhdl)
+                                f_csv.writerow([stamp, joint_pos_str])
+                        # else:
+                        #     logger.debug("Need to Create File Objects before Logging !!")
+
+
 
                     # elif data[:8] == 'FNAME$$$':
                     #     self.fileUpdated.emit("")
@@ -538,22 +591,23 @@ class ImageProcessingWorker(QObject):
 
 
             try:
-                # apriltag detection
-                at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag16h5"))
-                at_det_result = sorted(at_det.detect(frame_grey), key=lambda x: x.tag_id)[:4]
+                if not detect_rack:
+                    # apriltag detection
+                    at_det = apriltag.Detector(apriltag.DetectorOptions(families="tag16h5"))
+                    at_det_result = sorted(at_det.detect(frame_grey), key=lambda x: x.tag_id)[:4]
 
-                tag_0_top_left = at_det_result[0].corners[0]
-                tag_1_top_right = at_det_result[1].corners[1]
-                tag_2_bottom_right = at_det_result[2].corners[2]
-                tag_3_bottom_left = at_det_result[3].corners[3]
+                    tag_0_top_left = at_det_result[0].corners[0]
+                    tag_1_top_right = at_det_result[1].corners[1]
+                    tag_2_bottom_right = at_det_result[2].corners[2]
+                    tag_3_bottom_left = at_det_result[3].corners[3]
 
-                combined_corners = np.stack([tag_0_top_left,
-                    tag_1_top_right,
-                    tag_2_bottom_right, 
-                    tag_3_bottom_left])
-                
-                at_det_rack_result = []
-                if detect_rack:
+                    combined_corners = np.stack([tag_0_top_left,
+                        tag_1_top_right,
+                        tag_2_bottom_right, 
+                        tag_3_bottom_left])
+                    
+                    at_det_rack_result = []
+                else:
                     at_det_rack = apriltag.Detector(apriltag.DetectorOptions(families="tag25h9"))
                     at_det_rack_result = at_det_rack.detect(frame_grey)
 
@@ -607,10 +661,10 @@ class ImageProcessingWorker(QObject):
 
             if atdet_success == True and circle_success == True:
                 try:
-
-                    frame = self.visualize_atag(frame, at_det_result, combined_corners)
                     if detect_rack:
                         frame = self.visualize_atag(frame, at_det_rack_result, combined_rack_corners)
+                    else:
+                        frame = self.visualize_atag(frame, at_det_result, combined_corners)
                     frame = self.visualize_circles(frame, circles_detected)
                 except Exception as e:
                     logger.debug(f"visualization failed : {e}")
@@ -823,29 +877,43 @@ class WebcamCaptureApp(QWidget):
         self.rec_timestamp_label.setText(status_str + recv[1])
 
     def compute_and_send_pose(self, recv):
-        # convert string to array
-        recv_arr = np.array(json.loads(recv[0]))
-        print(recv_arr)
+        joint_pos_str, stamp, calc_pos = recv
 
-        h, status = self.spatial_processing_worker.compute_homography(
-            self.spatial_processing_worker.corners_phy_meter_chip, self.combined_corners, )
-        if status.all() == False:
-            logger.debug("Homography computation failed")
-            
-        ret = self.spatial_processing_worker.compute_pose(h, recv_arr)
-        desired_pose, sol = ret
-        if not isinstance(sol, type(None)):
-            try:
-                if isinstance(desired_pose, np.ndarray):
-                    desired_pose  = SE3(desired_pose)
-                elif isinstance(desired_pose, SE3):
-                    pass
+        if calc_pos != "":
+            # convert string to array
+            recv_arr = np.array(json.loads(joint_pos_str))
+
+            if calc_pos == "chip":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_chip, self.combined_corners, 
+                )
+            elif calc_pos == "rack":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_rack, self.combined_rack_corners, 
+                )
+            elif calc_pos == "drop":
+                h, status = self.spatial_processing_worker.compute_homography(
+                    self.spatial_processing_worker.corners_phy_meter_chip, self.combined_corners, 
+                )
+            # print(h, status)
+            if status.all() == False:
+                logger.debug("Homography computation failed")
+            else:
+                desired_pose, sol = self.spatial_processing_worker.compute_pose(h, recv_arr)
                 self.ip_client.send_pose_rpy(desired_pose.t, desired_pose.rpy())
-            except Exception as e:
-                logger.debug(e)
-                pass
-        else:
-            logger.debug("MAIN: IK failed to converge")
+                print(desired_pose, sol)
+            if not isinstance(sol, type(None)):
+                try:
+                    if isinstance(desired_pose, np.ndarray):
+                        desired_pose  = SE3(desired_pose)
+                    elif isinstance(desired_pose, SE3):
+                        pass
+                    self.ip_client.send_pose_rpy(desired_pose.t, desired_pose.rpy())
+                except Exception as e:
+                    logger.debug(e)
+                    pass
+            else:
+                logger.debug("MAIN: IK failed to converge")
 
 
     def rec_extracted_features(self, recv):
