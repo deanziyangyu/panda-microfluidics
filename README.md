@@ -61,7 +61,7 @@ Usage:
         `py ./match_markers_gui.py --mode s`
 2. for startup specifying path and timestamp:
         ```
-        py ./webcam_server.py --mode v --path ./path/to/data_collection_folder/YYMMDD_HHMMSS \
+        py ./match_markers_gui.py --mode v --path ./path/to/data_collection_folder/YYMMDD_HHMMSS \
             --init_time YYMMDD_HHMMSS
         ```
 3. Shell launch cmd from other .py program:
