@@ -1,0 +1,35 @@
+Output of calibration for solver: HAND_EYE_ANDREFF is: [[ 0.00878689 -0.99943456  0.0324553   0.03283856]
+ [ 0.99990276  0.00843028 -0.01110836 -0.02219058]
+ [ 0.01082847  0.03254975  0.99941146 -0.03085028]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03255741401632708, -0.01082867911627902, 1.562008804269254)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.08316796 -0.1384263   0.07380188],[4.19473476 3.96356819 1.17557445])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([-0.10882394 -0.92877856 -0.14629846],[6.20254487 6.15009946 2.03623251])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_DANIILIDIS is: [[ 0.00840699 -0.99952922  0.02950712  0.05400489]
+ [ 0.99991606  0.00811199 -0.01010311 -0.03151746]
+ [ 0.009859    0.02958958  0.99951351 -0.05572089]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.029595338378417095, -0.009859155697382148, 1.5623888321164903)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.17768624 -0.16251095  0.07060363],[4.17607572 3.88822303 1.26746052])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.17960348 0.17299645 0.2552951 ],[3.07046867 3.82017923 1.03675882])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_HORAUD is: [[ 0.00785649 -0.99945007  0.03221546  0.05430214]
+ [ 0.99991112  0.00750493 -0.01101918 -0.03194078]
+ [ 0.01077135  0.03229916  0.9994202  -0.05441646]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03230665737060011, -0.010771557440139495, 1.5629392975544338)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.09204834 -0.13995284  0.06552373],[4.19932878 3.95071097 1.18174215])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.20255591 0.18852395 0.24067476],[3.06374867 3.80812617 1.01466224])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_PARK is: [[ 0.00686541 -0.99948874  0.03122687  0.05432225]
+ [ 0.99992217  0.00653638 -0.01062661 -0.03190439]
+ [ 0.01041706  0.0312974   0.99945583 -0.05437494]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.031304205953649036, -0.010417252842212529, 1.5639304880095866)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.12507663 -0.14906674  0.05672666],[4.19864819 3.91843167 1.2112785 ])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.2018266  0.18879366 0.23801953],[3.07239566 3.81165701 1.01959869])
+DEBUG    [_calibration_solver.py:38] Output of calibration for solver: HAND_EYE_TSAI is: [[ 0.01212702 -0.9994259   0.03163564  0.0537774 ]
+ [ 0.99985468  0.01174098 -0.01236027 -0.03114828]
+ [ 0.01198174  0.03178094  0.99942304 -0.05437236]
+ [ 0.          0.          0.          1.        ]]
+DEBUG    [_calibration_solver.py:39] Rotation in euler format(0.03178857363829337, -0.011982023572518631, 1.5586681357194645)
+DEBUG    [_calibration_solver.py:40] This yields rotation error (mean, variance) in degrees = ([ 0.09846636 -0.10301283  0.10438672],[4.19147479 3.97279019 1.1942315 ])
+DEBUG    [_calibration_solver.py:41] This yields translation error (mean, variance) in cms - ([0.16025029 0.162964   0.23883865],[3.04668343 3.81525046 1.03370495])

@@ -40,7 +40,7 @@ to the GUI program.
 
 ### Match Maker GUI: match_markers_gui.py
 
-1. A OpenCV-based Webcam Server Listening on [IP] [PORT].
+1. A OpenCV-based Webcam Server Listening on [IP] [PORT]. Does not require the ROS2 container to run.
 It uses Pyqt5 based qtthreads for realtime Concurrency of the below functionalities:
 - Video capture thread
 - Feature Extraction
