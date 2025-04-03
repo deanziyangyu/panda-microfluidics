@@ -1,7 +1,7 @@
 # panda-microfluidics
 panda-microfluidics
 
-Repository to Manipulate a franka robot to grasp microfluidic items 
+Repository to Manipulate a Franka Research Emika Panda 7-DoF robot to grasp microfluidic devices, pipets, and perform dispensing.
 
 Authors: Ziyang Yu and Eric Liang
 
@@ -9,11 +9,13 @@ Repository: https://github.com/deanziyangyu/panda-microfluidics
 
 ### Usage:
 
-e to the folder using cd /home/scratchpad/franka_ros2_csc379 and run the following
+e to the folder using 
+`cd /home/scratchpad/franka_ros2_csc379` and run the following
+```
 commands in both terminals:
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-
+```
 
 Launch the Docker Container, run
 `ros2 launch franka_gripper gripper.launch.py robot_ip:=<YOUR IP HERE`
