@@ -33,7 +33,7 @@ HOST = '127.0.0.1'  # IP address on host PC
 PORT = 12345       # client port number on host PC
 PORT_SERVER = 12346 # server port number on host PC
 
-IS_ONLINE = False
+IS_ONLINE = True
 IS_PYBULLET = False
 
 
@@ -180,7 +180,7 @@ class SocketCommClient:
             self.client_socket.connect((self.host, self.port))
         try:
             self.sendall(bytes("JNTCALC0"+send_str, 'utf-8'))
-            print(f"Sent Pose Request --> {self.host}:{self.port}")
+            print(f"Sent Pose Request 0 --> {self.host}:{self.port}")
         except Exception as e:
             print(e)
 
@@ -189,8 +189,8 @@ class SocketCommClient:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
         try:
-            self.sendall(bytes("JNTCALC1$"+send_str, 'utf-8'))
-            print(f"Sent Pose Request --> {self.host}:{self.port}")
+            self.sendall(bytes("JNTCALC1"+send_str, 'utf-8'))
+            print(f"Sent Pose Request 1 --> {self.host}:{self.port}")
         except Exception as e:
             print(e)
     
@@ -199,8 +199,19 @@ class SocketCommClient:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
         try:
-            self.sendall(bytes("JNTCALC2$"+send_str, 'utf-8'))
-            print(f"Sent Pose Request --> {self.host}:{self.port}")
+            self.sendall(bytes("JNTCALC2"+send_str, 'utf-8'))
+            print(f"Sent Pose Request 2 --> {self.host}:{self.port}")
+        except Exception as e:
+            print(e)
+
+
+    def request_tag_type_change(self,):
+        if not self.client_socket:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+        try:
+            self.sendall(bytes("CHGTAG", 'utf-8'))
+            print(f"Change apriltag type to rack--> {self.host}:{self.port}")
         except Exception as e:
             print(e)
 
@@ -358,11 +369,11 @@ def main(args=None):
         spin_thread.start()
     time.sleep(2)  # Allow time for spin thread to initialize
 
-    # print("homing...")
-    # if IS_ONLINE: 
-    #     gripper_client.do_homing_async()
-    # print("finished homing...")
-    # time.sleep(5)
+    print("homing...")
+    if IS_ONLINE: 
+        gripper_client.do_homing_async()
+    print("finished homing...")
+    time.sleep(5)
 
     # Create Panda robot model
     panda = rtb.models.Panda()
@@ -375,13 +386,13 @@ def main(args=None):
 
     start_pose = SE3(0.5, 0, 0.5)*SE3.RPY(-3.13, 0.097, 0.035) #transition pose:
     device_view_pose = SE3(0.506, 0.3, 0.3)*SE3.RPY(-3.13, 0.097, 0.035)
-    device_pickup_pose = SE3(0.506, 0.3, 0.08)*SE3.RPY(-3.13, 0.097, 0.035)
+    device_pickup_pose = SE3(0.506, 0.3, 0.0)*SE3.RPY(-3.13, 0.097, 0.035)
     placement_view_pose = SE3(0.506, 0, 0.3)*SE3.RPY(-3.13, 0.097, 0.035)
-    device_place_pose = SE3(0.506, 0, 0.08)*SE3.RPY(-3.13, 0.097, 0.035)
+    device_place_pose = SE3(0.506, 0, 0.0)*SE3.RPY(-3.13, 0.097, 0.035)
     pipette_view_pose = SE3(0.506, 0.4, 0.4)*SE3.RPY(-3.13, 0.097, 0.035)
-    pipette_pickup_pose = SE3(0.506, 0.4, 0.2)*SE3.RPY(-3.13, 0.097, 0.035)
-    pipette_alignment_pose = SE3(0.45, 0, 0.3)*SE3.RPY(-3.13, 0.097, 0.035)
-
+    pipette_slightly_above_pose = SE3(0.508, 0.453, 0.25)*SE3.RPY(-3.13, 0.097, 0.035)
+    pipette_pickup_pose = SE3(0.508, 0.453, 0.17)*SE3.RPY(-3.13, 0.097, 0.035)
+    pipette_alignment_pose = SE3(0.4815, 0.052, 0.27)*SE3.RPY(-3.13, 0.097, 0.035)
 
 
     # Device View pose: 
@@ -523,6 +534,9 @@ Step 3: Move to above device via a targeted posed from camera
     except Exception as e:
         print(e)
         target_pose = device_view_pose
+    
+    # This is added for testing
+    # target_pose = right_above_device_conf_ref
 
 
     if IS_ONLINE:
@@ -630,6 +644,11 @@ Step 4: Lower the ee to pick up device in pickup pose
         print("NO POSE")
     time.sleep(2)
 
+    # change tag type  
+    socket_client.request_tag_type_change()
+    time.sleep(1)
+
+
     # Step 9: Move to syring view pose
     if IS_ONLINE:
         ret_pose = move_to_pose(fsi, panda, pipette_view_pose)
@@ -652,14 +671,16 @@ Step 10: Move to slightly above pipet based on april tags in workspace
     # based on read_target_pose
     # compose SE3 from data {"x": 0.5, "y": 0.2, "z": 0.3, "rpy": [-3.13, 0.097, 0.035]}
     if IS_ONLINE:
-        ret_pose = move_to_pose(fsi, panda, pipette_view_pose)
+        ret_pose = move_to_pose(fsi, panda, pipette_slightly_above_pose)
     else:
-        ret_pose = move_to_pose_offline(slightly_above_pipet_conf_ref, panda, pipette_view_pose)
+        ret_pose = move_to_pose_offline(slightly_above_pipet_conf_ref, panda, pipette_slightly_above_pose)
     if isinstance(ret_pose, np.ndarray):
         socket_client.request_pose_compute_rack(json.dumps(ret_pose.tolist()))
     else:
         print("NO POSE")
     # wait_for_pose_refinement = True
+
+
     socket_server.resume()
     while socket_server.running:
         try:
@@ -674,13 +695,20 @@ Step 10: Move to slightly above pipet based on april tags in workspace
     try:
         data_dict = json.loads(data)
         print(data_dict)
-        pipette_pickup_pose = SE3(
+        pipette_pickup_pose_comp = SE3(
             data_dict['x'], data_dict['y'], data_dict['z']
             )*SE3.RPY(
             data_dict['r'], data_dict['p'], data_dict['y'])
     except Exception as e:
         print(e)
-        pipette_pickup_pose = device_view_pose
+        pipette_pickup_pose_comp = device_view_pose
+
+    # This is added for testing
+    # pipette_pickup_pose = pipette_pickup_pose_comp
+
+    # change tag type
+    time.sleep(1)
+    socket_client.request_tag_type_change()
 
 
     # Step 10: assuming syring is same place everytime and fixed, we just open loop pick up pipette
@@ -693,7 +721,7 @@ Step 10: Move to slightly above pipet based on april tags in workspace
     else:
         print("NO POSE")
     time.sleep(2)
-    gripper_client.do_grasp_async(width = grasp_width_pipet_squeezing[2],speed=0.05) #grasp pipette
+    gripper_client.do_grasp_async(width = grasp_width_pipet_squeezing[1],speed=0.05) #grasp pipette
     time.sleep(3)
 
     # In between here we add more steps to get fluids from a beaker etc.
