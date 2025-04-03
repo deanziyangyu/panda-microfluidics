@@ -35,7 +35,7 @@ Two Main Programs: `franka_run.py` and `match_markers_gui.py`
 - Video recording (starts automaticaly if a datacollection directory is specified)
 - Logging
 to the GUI program.
-4. Accepts {'x', 'y', 'z', 'r', 'p', 'y'} from GUI via another client sockets.
+4. Accepts `{'x', 'y', 'z', 'r', 'p', 'y'}` from GUI via another client sockets.
 
 
 ### Match Maker GUI: match_markers_gui.py
@@ -54,17 +54,17 @@ It uses Pyqt5 based qtthreads for realtime Concurrency of the below functionalit
 - JointPos
 - Video recording (starts automaticaly if a datacollection directory is specified)
 - Logging
-4. Sends {'x', 'y', 'z', 'r', 'p', 'y'} from GUI via another client sockets.
+4. Sends `{'x', 'y', 'z', 'r', 'p', 'y'}` from GUI via another client sockets.
 
 Usage:
-    for startup without path and timestamp specified:
+1. for startup without path and timestamp specified:
         `py ./match_markers_gui.py --mode s`
-    for startup specifying path and timestamp:
+2. for startup specifying path and timestamp:
         ```
         py ./webcam_server.py --mode v --path ./path/to/data_collection_folder/YYMMDD_HHMMSS \
             --init_time YYMMDD_HHMMSS
         ```
-Shell launch cmd from other .py program:
+3. Shell launch cmd from other .py program:
     silent:  `Popen(["py", "./match_markers_gui.py", "--mode", "s"])`
     verbose: 
     ```
